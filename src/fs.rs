@@ -81,10 +81,10 @@ impl FS {
             .unwrap();
         // println!("Buffer:[{:?}]", buf);
 
-        let inode = fs.write_blocks(buf);
-        // 将 inode 写入第一个块
+        let block_ids = fs.write_blocks(buf);
+        // 将 block_ids 写入第一个块
         let mut buffer = vec![0u8; 8];
-        inode
+        block_ids
             .iter()
             .map(|b| b.to_be_bytes())
             .flatten()
@@ -106,7 +106,7 @@ impl FS {
             .unwrap();
         // 写入
         // println!("Buffer:[{:?}]", buf);
-        let inode = self.write_blocks(buf);
+        let block_ids = self.write_blocks(buf);
         // 创建新目录元数据
         let new_meta = FSMeta {
             name: String::from(name),
@@ -114,7 +114,7 @@ impl FS {
             size: 0,
             created: 0,
             modified: 0,
-            inode: inode,
+            block_ids: block_ids,
         };
         let mut buf = Vec::new();
         // 序列化目录节点
@@ -157,7 +157,7 @@ impl FS {
     }
 
     // 读取文件系统中的文件/文件夹的块地址
-    fn get_inode(&self, path: &str) -> Option<Vec<u64>> {
+    fn get_block_ids(&self, path: &str) -> Option<Vec<u64>> {
         let path = path.split("/").filter(|v| !v.is_empty());
         let mut file = &self.file;
         let mut buffer: Vec<u8> = vec![0u8; 4096];
@@ -175,9 +175,9 @@ impl FS {
             nodes.push(node);
         }
         // 根节点
-        let mut inode: Vec<u64> = nodes;
+        let mut block_ids: Vec<u64> = nodes;
         for folder_name in path {
-            let data = self.read_blocks(inode);
+            let data = self.read_blocks(block_ids);
             let folder: FSFolder = rmps::from_slice(&data).unwrap();
             let data = folder
                 .0
@@ -185,20 +185,20 @@ impl FS {
                 .find(|child| child.name == folder_name && child.is_dir);
             match data {
                 Some(child) => {
-                    inode = child.inode.clone();
+                    block_ids = child.block_ids.clone();
                 }
                 None => {
                     return None;
                 }
             }
         }
-        Some(inode)
+        Some(block_ids)
     }
 
     pub fn ls_folder(&self, path: &str) -> Option<FSFolder> {
-        let inode = self.get_inode(path).expect("No such file or directory");
-        println!("inode:[{:?}]", inode);
-        let data = self.read_blocks(inode);
+        let block_ids = self.get_block_ids(path).expect("No such file or directory");
+        println!("block_ids:[{:?}]", block_ids);
+        let data = self.read_blocks(block_ids);
         let folder: FSFolder = rmps::from_slice(&data).unwrap();
         Some(folder)
     }
@@ -229,18 +229,18 @@ impl FS {
     }
 
     fn update_file(&self, path: &str, buf: Vec<u8>) {
-        let mut inode = self.get_inode(path).expect("No such file or directory"); // 获取原有文件节点
-                                                                                  // println!("Update Old Inode:[{:?}]", inode);
+        let mut block_ids = self.get_block_ids(path).expect("No such file or directory"); // 获取原有文件节点
+                                                                                  // println!("Update Old Block_ids:[{:?}]", block_ids);
         let mut file = &self.file;
         // 判断是否需要扩容或缩容
         let need_blocks = buf.len() / 4096 + 1; // 4KB * Blocks
-        if inode.len() < need_blocks {
+        if block_ids.len() < need_blocks {
             // 扩容
             // println!("扩容 Need Blocks:[{}]", need_blocks);
-            let new_blocks = self.alloc_new_blocks(need_blocks - inode.len());
-            inode.append(&mut new_blocks.clone());
+            let new_blocks = self.alloc_new_blocks(need_blocks - block_ids.len());
+            block_ids.append(&mut new_blocks.clone());
             let mut i = 0;
-            while i < inode.len() {
+            while i < block_ids.len() {
                 file.seek(SeekFrom::Start(new_blocks[i] * 4096 + self.skip))
                     .expect("Seek Error");
                 file.write_all(&buf[i * 4096..min((i + 1) * 4096, buf.len())])
@@ -249,12 +249,12 @@ impl FS {
             }
         } else {
             // 缩容或不变
-            let (_, recycle_node) = inode.split_at(need_blocks);
+            let (_, recycle_node) = block_ids.split_at(need_blocks);
             // println!("缩容 Need Blocks:[{}]", need_blocks);
             // println!("Recycle Node:[{:?}]", recycle_node);
             self.free_blocks(recycle_node.to_vec());
-            inode.truncate(need_blocks);
-            inode.iter().enumerate().for_each(|(i, block)| {
+            block_ids.truncate(need_blocks);
+            block_ids.iter().enumerate().for_each(|(i, block)| {
                 let skip = *block * 4096 + self.skip;
                 file.seek(SeekFrom::Start(skip)).expect("Seek Error");
                 file.write_all(&buf[i * 4096..min((i + 1) * 4096, buf.len())])
@@ -269,29 +269,29 @@ impl FS {
         match parent_path {
             Some(parent_path) => {
                 let parent_path_str = parent_path.to_str().expect("Wrong Path");
-                let parent_inode = self
-                    .get_inode(parent_path_str)
+                let parent_block_ids = self
+                    .get_block_ids(parent_path_str)
                     .expect("No such file or directory");
-                let data = self.read_blocks(parent_inode);
+                let data = self.read_blocks(parent_block_ids);
                 let mut folder: FSFolder = rmps::from_slice(&data).unwrap();
                 let child = folder
                     .0
                     .iter_mut()
                     .find(|child| child.name == child_path.file_name().unwrap().to_str().unwrap())
                     .expect("No such file or directory");
-                child.inode = inode;
+                child.block_ids = block_ids;
                 let data = rmps::to_vec(&folder).unwrap();
                 self.update_file(parent_path_str, data);
             }
             None => {
                 // 根目录
-                if inode.len() * 8 > 4096 {
+                if block_ids.len() * 8 > 4096 {
                     // 根目录满，报错
                     panic!("Root Folder is full");
                 }
                 let mut buffer = Vec::new();
-                // 把 新的 inode 写入
-                inode.iter().for_each(|block| {
+                // 把 新的 block_ids 写入
+                block_ids.iter().for_each(|block| {
                     // u64 转为 8 个 u8
                     let block_bytes = block.to_be_bytes();
                     buffer.append(&mut block_bytes.to_vec());

@@ -10,5 +10,5 @@ pub struct FSMeta{
 	pub size: u64,
 	pub created: u32,
 	pub modified: u32,
-	pub inode: Vec<u64> // 文件块列表
+	pub block_ids: Vec<u64> // 文件块列表
 }
