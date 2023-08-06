@@ -4,11 +4,12 @@ use std::path::Path;
 use std::{fs::File, io::Write};
 
 use bit_set::BitSet;
+use prettytable::format::consts::{FORMAT_CLEAN, FORMAT_NO_BORDER_LINE_SEPARATOR, FORMAT_BOX_CHARS};
 use prettytable::{row, Table};
 use serde::Serialize;
 
 use crate::meta::{FSFolder, FSMeta};
-use crate::time::{timestamp, format_timestamp};
+use crate::time::{format_timestamp, timestamp};
 
 pub struct FS {
     pub file: File,
@@ -99,7 +100,6 @@ impl FS {
     }
 
     pub fn mkdir(&self, path: &str, name: &str) {
-
         // 寻找父目录
         let mut folder = self.ls_folder(path).expect("No such file or directory");
         // println!("Folder:[{:?}]", folder);
@@ -107,12 +107,17 @@ impl FS {
         // 检查是否存在同名文件
         if folder.0.iter().any(|f| {
             let result = f.name == name;
-            if result{
+            if result {
                 is_dir = f.is_dir;
             }
             result
         }) {
-            println!("存在同名文件{}: {}", if is_dir { "夹" } else { "" },name);
+            println!(
+                "{}:存在同名文件{}: {}",
+                path,
+                if is_dir { "夹" } else { "" },
+                name
+            );
             return;
         }
 
@@ -139,7 +144,6 @@ impl FS {
         new_meta
             .serialize(&mut rmps::Serializer::new(&mut buf).with_struct_map())
             .unwrap();
-        
 
         // 存入父目录节点列表
         folder.0.push(new_meta);
@@ -155,10 +159,23 @@ impl FS {
         self.update_file(path, buf);
     }
 
-    pub fn ls(self, path: &str) {
+    pub fn ls(&self, path: &str) {
         let folder = self.ls_folder(path).expect("No such file or directory");
         let mut table = Table::new();
-        table.add_row(row!["名称", "类型", "实际大小","磁盘大小", "创建时间", "修改时间"]);
+        table.set_format(*FORMAT_BOX_CHARS);
+        table.add_row(row![format!(
+            "{}{}",
+            path,
+            if path == "/" { "" } else { "/" }
+        ),]);
+        table.add_row(row![
+            "名称",
+            "类型",
+            "大小",
+            "磁盘大小",
+            "创建时间",
+            "修改时间"
+        ]);
         folder.0.iter().for_each(|child| {
             table.add_row(row!(
                 child.name,
@@ -169,6 +186,10 @@ impl FS {
                 format_timestamp(child.modified)
             ));
         });
+        if table.len() < 1 {
+            table.add_row(row![format!("{}:文件夹为空", path)]);
+        }
+
         table.printstd();
     }
 
@@ -246,7 +267,7 @@ impl FS {
 
     fn update_file(&self, path: &str, buf: Vec<u8>) {
         let mut block_ids = self.get_block_ids(path).expect("No such file or directory"); // 获取原有文件节点
-                                                                                  // println!("Update Old Block_ids:[{:?}]", block_ids);
+                                                                                          // println!("Update Old Block_ids:[{:?}]", block_ids);
         let mut file = &self.file;
         // 判断是否需要扩容或缩容
         let need_blocks = buf.len() / 4096 + 1; // 4KB * Blocks
