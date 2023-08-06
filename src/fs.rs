@@ -4,7 +4,9 @@ use std::path::Path;
 use std::{fs::File, io::Write};
 
 use bit_set::BitSet;
-use prettytable::format::consts::{FORMAT_CLEAN, FORMAT_NO_BORDER_LINE_SEPARATOR, FORMAT_BOX_CHARS};
+use prettytable::format::consts::{
+    FORMAT_BOX_CHARS, FORMAT_CLEAN, FORMAT_NO_BORDER_LINE_SEPARATOR,
+};
 use prettytable::{row, Table};
 use serde::Serialize;
 
