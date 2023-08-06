@@ -16,15 +16,15 @@ fs.mkdir("/hello", "ash");
 ## Example
 ```rust
     let fs = FS::mkfs("test.fs",1*MB_BLOCK);
-	fs.ls("/");
+    fs.ls("/");
     fs.mkdir("/", "hello");
     fs.mkdir("/", "ash");
     fs.mkdir("/", "mock");
     fs.mkdir("/", "mock");
     fs.ls("/");
-	fs.ls("/mock");
-	fs.mkdir("/mock", "mock2");
-	fs.ls("/mock");
+    fs.ls("/mock");
+    fs.mkdir("/mock", "mock2");
+    fs.ls("/mock");
 ```
 ![result](img/ls.png)
 
