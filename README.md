@@ -15,7 +15,7 @@ fs.mkdir("/hello", "ash");
 
 ## Example
 ```rust
-    let fs = FS::mkfs("test.fs",1*MB_BLOCK);
+    let fs = FS::mkfs("test.fs",1 * MB_BLOCK);
     fs.ls("/");
     fs.mkdir("/", "hello");
     fs.mkdir("/", "ash");
