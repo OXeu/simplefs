@@ -85,7 +85,7 @@ impl FS {
             .unwrap();
         // println!("Buffer:[{:?}]", buf);
 
-        let block_ids = fs.write_blocks(buf);
+        let block_ids = fs.write_blocks(&buf);
         // 将 block_ids 写入第一个块
         let mut buffer = vec![0u8; 8];
         block_ids
@@ -131,7 +131,7 @@ impl FS {
             .unwrap();
         // 写入
         // println!("Buffer:[{:?}]", buf);
-        let block_ids = self.write_blocks(buf);
+        let block_ids = self.write_blocks(&buf);
         // 创建新目录元数据
         let new_meta = FSMeta {
             name: String::from(name),
@@ -139,7 +139,7 @@ impl FS {
             size: 0,
             created: timestamp(),
             modified: timestamp(),
-            block_ids: block_ids,
+            block_ids: block_ids.to_owned(),
         };
         let mut buf = Vec::new();
         // 序列化目录节点
@@ -158,7 +158,73 @@ impl FS {
             .unwrap();
 
         // println!("Buffer:[{:?}]", buf);
-        self.update_file(path, buf);
+        self.update_file(path, &buf);
+    }
+
+    /**
+     * 写入文件
+     * 如果文件已存在，则覆盖
+     * 如果文件不存在，则创建
+     * 如果文件已存在但是文件夹，则报错
+     */
+    pub fn write(&self, path: &str, name: &str, content: &[u8]) {
+        // 寻找父目录
+        let mut folder = self.ls_folder(path).expect("No such file or directory");
+        // println!("Folder:[{:?}]", folder);
+        // 创建新目录元数据
+        let mut new_meta = FSMeta {
+            name: String::from(name),
+            is_dir: false,
+            size: content.len() as u64,
+            created: timestamp(),
+            modified: timestamp(),
+            block_ids: Vec::new(),
+        };
+        // 检查是否存在同名文件夹
+        match folder.0.iter().find(|f| f.name == name) {
+            Some(f) => {
+                if f.is_dir {
+                    println!("写入文件失败: {}{}:存在同名文件夹", path, name);
+                    return;
+                }
+                // 更新文件元数据
+                new_meta.block_ids = f.block_ids.to_owned();
+                new_meta.created = f.created;
+            }
+            None => {}
+        }
+        // 写入
+        let block_ids = self.write_blocks(content);
+        if new_meta.block_ids.len() != 0 {
+            // 释放旧块
+            self.free_blocks(&new_meta.block_ids);
+        }
+        // 更新块
+        new_meta.block_ids = block_ids.to_owned();
+        let mut buf = Vec::new();
+        // 序列化目录节点
+        new_meta
+            .serialize(&mut rmps::Serializer::new(&mut buf).with_struct_map())
+            .unwrap();
+
+        // 存入父目录节点列表, 如果存在同名文件则替换
+        let index = folder
+            .0
+            .iter()
+            .position(|f| f.name == name)
+            .unwrap_or(folder.0.len());
+        if index != folder.0.len() {
+            folder.0.remove(index);
+        }
+        folder.0.push(new_meta);
+
+        // 更新父目录节点列表
+        let mut buf = Vec::new();
+        folder
+            .serialize(&mut rmps::Serializer::new(&mut buf).with_struct_map())
+            .unwrap();
+        // println!("Buffer size: {}({})", humanity_size(buf.len() as u64),buf.len());
+        self.update_file(path, &buf);
     }
 
     pub fn ls(&self, path: &str) {
@@ -195,6 +261,41 @@ impl FS {
         table.printstd();
     }
 
+    // 读取文件系统中的文件/文件夹
+    pub fn read(&self, path: &str) -> Vec<u8> {
+        let path = Path::new(path);
+        let parent = path.parent();
+        match parent {
+            Some(parent_path) => {
+                let parent_str = parent_path.to_str().expect("父文件夹路径错误");
+                let folder = self
+                    .ls_folder(parent_str)
+                    .expect("No such file or directory");
+                let name: &str = path
+                    .file_name()
+                    .expect("文件名错误")
+                    .to_str()
+                    .expect("文件名错误");
+                let file = folder
+                    .0
+                    .iter()
+                    .find(|f| f.name == name)
+                    .expect("No such file or directory");
+                let buf = self.read_blocks(&file.block_ids);
+                if file.is_dir {
+                    // 序列化为 json
+                    serde_json::to_string(&file).unwrap().as_bytes().to_vec()
+                } else {
+                    buf
+                }
+            }
+            None => {
+                println!("{}:不是文件夹", path.display());
+                Vec::new()
+            }
+        }
+    }
+
     // 读取文件系统中的文件/文件夹的块地址
     fn get_block_ids(&self, path: &str) -> Option<Vec<u64>> {
         let path = path.split("/").filter(|v| !v.is_empty());
@@ -216,7 +317,7 @@ impl FS {
         // 根节点
         let mut block_ids: Vec<u64> = nodes;
         for folder_name in path {
-            let data = self.read_blocks(block_ids);
+            let data = self.read_blocks(&block_ids);
             let folder: FSFolder = rmps::from_slice(&data).unwrap();
             let data = folder
                 .0
@@ -237,20 +338,23 @@ impl FS {
     pub fn ls_folder(&self, path: &str) -> Option<FSFolder> {
         let block_ids = self.get_block_ids(path).expect("No such file or directory");
         // println!("block_ids:[{:?}]", block_ids);
-        let data = self.read_blocks(block_ids);
+        let data = self.read_blocks(&block_ids);
         let folder: FSFolder = rmps::from_slice(&data).unwrap();
         Some(folder)
     }
 
-    fn read_blocks(&self, blocks: Vec<u64>) -> Vec<u8> {
+    fn read_blocks(&self, blocks: &[u64]) -> Vec<u8> {
         let mut file = &self.file;
         let mut buffer = vec![0u8; 4096];
         let mut data = Vec::new();
+        // println!("Read blocks:[{:?}]", blocks);
         blocks.iter().for_each(|block| {
+            // println!("Read block:[{:?}]", block);
             file.seek(SeekFrom::Start(block * 4096 + self.skip))
                 .expect("Seek Error");
             file.read_exact(&mut buffer).expect("Read Error");
             data.append(&mut buffer);
+            buffer = vec![0u8; 4096];
         });
 
         // println!("Read data original:[{:?}]", data);
@@ -267,7 +371,7 @@ impl FS {
         return data;
     }
 
-    fn update_file(&self, path: &str, buf: Vec<u8>) {
+    fn update_file(&self, path: &str, buf: &[u8]) {
         let mut block_ids = self.get_block_ids(path).expect("No such file or directory"); // 获取原有文件节点
                                                                                           // println!("Update Old Block_ids:[{:?}]", block_ids);
         let mut file = &self.file;
@@ -276,11 +380,13 @@ impl FS {
         if block_ids.len() < need_blocks {
             // 扩容
             // println!("扩容 Need Blocks:[{}]", need_blocks);
-            let new_blocks = self.alloc_new_blocks(need_blocks - block_ids.len());
+            let new_blocks = self
+                .alloc_new_blocks(need_blocks - block_ids.len())
+                .to_vec();
             block_ids.append(&mut new_blocks.clone());
             let mut i = 0;
             while i < block_ids.len() {
-                file.seek(SeekFrom::Start(new_blocks[i] * 4096 + self.skip))
+                file.seek(SeekFrom::Start(block_ids[i] * 4096 + self.skip))
                     .expect("Seek Error");
                 file.write_all(&buf[i * 4096..min((i + 1) * 4096, buf.len())])
                     .expect("Write Error");
@@ -291,7 +397,7 @@ impl FS {
             let (_, recycle_node) = block_ids.split_at(need_blocks);
             // println!("缩容 Need Blocks:[{}]", need_blocks);
             // println!("Recycle Node:[{:?}]", recycle_node);
-            self.free_blocks(recycle_node.to_vec());
+            self.free_blocks(recycle_node);
             block_ids.truncate(need_blocks);
             block_ids.iter().enumerate().for_each(|(i, block)| {
                 let skip = *block * 4096 + self.skip;
@@ -311,7 +417,7 @@ impl FS {
                 let parent_block_ids = self
                     .get_block_ids(parent_path_str)
                     .expect("No such file or directory");
-                let data = self.read_blocks(parent_block_ids);
+                let data = self.read_blocks(&parent_block_ids);
                 let mut folder: FSFolder = rmps::from_slice(&data).unwrap();
                 let child = folder
                     .0
@@ -320,7 +426,7 @@ impl FS {
                     .expect("No such file or directory");
                 child.block_ids = block_ids;
                 let data = rmps::to_vec(&folder).unwrap();
-                self.update_file(parent_path_str, data);
+                self.update_file(parent_path_str, &data);
             }
             None => {
                 // 根目录
@@ -377,7 +483,7 @@ impl FS {
         free_blocks
     }
 
-    fn free_blocks(&self, blocks: Vec<u64>) {
+    fn free_blocks(&self, blocks: &[u64]) {
         let mut buffer = vec![0u8; self.size as usize / 8];
         let mut file = &self.file;
 
@@ -399,7 +505,7 @@ impl FS {
     }
 
     // 写入数据块，返回块号
-    fn write_blocks(&self, blocks: Vec<u8>) -> Vec<u64> {
+    fn write_blocks(&self, blocks: &[u8]) -> Vec<u64> {
         if blocks.len() == 0 {
             return Vec::new();
         }
@@ -425,7 +531,7 @@ impl FS {
 }
 
 // 将字节大小转换为人类可读的大小
-fn humanity_size(size: u64) -> String {
+pub fn humanity_size(size: u64) -> String {
     let mut size = size as f64;
     let mut unit = "B";
     if size > 1024.0 {
