@@ -13,18 +13,28 @@ let fs = FS::connect("test.fs");
 fs.mkdir("/hello", "ash");
 ```
 
+## 写入文件
+```rust
+fs.write("/hello", "test.txt", "hello world".as_bytes());
+```
+
+## 读取文件
+```rust
+let content = fs.read("/hello/test.txt");
+```
+
 ## Example
 ```rust
-    let fs = FS::mkfs("test.fs",1 * MB_BLOCK);
-    fs.ls("/");
-    fs.mkdir("/", "hello");
-    fs.mkdir("/", "ash");
-    fs.mkdir("/", "mock");
-    fs.mkdir("/", "mock");
-    fs.ls("/");
-    fs.ls("/mock");
-    fs.mkdir("/mock", "mock2");
-    fs.ls("/mock");
+let fs = FS::mkfs("test.fs",1 * MB_BLOCK);
+fs.ls("/");
+fs.mkdir("/", "hello");
+fs.mkdir("/", "ash");
+fs.mkdir("/", "mock");
+fs.mkdir("/", "mock");
+fs.ls("/");
+fs.ls("/mock");
+fs.mkdir("/mock", "mock2");
+fs.ls("/mock");
 ```
 ![result](img/ls.png)
 
