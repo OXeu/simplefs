@@ -1,8 +1,13 @@
 # SimpleFS
-## 初始化
+## 格式化
 ```rust
 let fs = FS::mkfs("test.fs",1 * MB_BLOCK);
 ```
+## 连接已有文件系统
+```rust
+let fs = FS::connect("test.fs");
+```
+
 ## 创建文件夹
 ```rust
 fs.mkdir("/hello", "ash");

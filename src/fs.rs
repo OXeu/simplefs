@@ -8,6 +8,7 @@ use prettytable::{row, Table};
 use serde::Serialize;
 
 use crate::meta::{FSFolder, FSMeta};
+use crate::time::{timestamp, format_timestamp};
 
 pub struct FS {
     pub file: File,
@@ -16,7 +17,7 @@ pub struct FS {
 }
 
 impl FS {
-    pub fn new(path: &str) -> FS {
+    pub fn connect(path: &str) -> FS {
         let mut buffer = vec![0u8; 8];
         let mut file = File::options()
             .read(true)
@@ -98,6 +99,23 @@ impl FS {
     }
 
     pub fn mkdir(&self, path: &str, name: &str) {
+
+        // 寻找父目录
+        let mut folder = self.ls_folder(path).expect("No such file or directory");
+        // println!("Folder:[{:?}]", folder);
+        let mut is_dir = false;
+        // 检查是否存在同名文件
+        if folder.0.iter().any(|f| {
+            let result = f.name == name;
+            if result{
+                is_dir = f.is_dir;
+            }
+            result
+        }) {
+            println!("存在同名文件{}: {}", if is_dir { "夹" } else { "" },name);
+            return;
+        }
+
         let new_dir_data = FSFolder { 0: Vec::new() };
         let mut buf = Vec::new();
         // 序列化新目录节点
@@ -112,8 +130,8 @@ impl FS {
             name: String::from(name),
             is_dir: true,
             size: 0,
-            created: 0,
-            modified: 0,
+            created: timestamp(),
+            modified: timestamp(),
             block_ids: block_ids,
         };
         let mut buf = Vec::new();
@@ -122,16 +140,13 @@ impl FS {
             .serialize(&mut rmps::Serializer::new(&mut buf).with_struct_map())
             .unwrap();
         
-        // 寻找父目录
-        let mut folder = self.ls_folder(path).expect("No such file or directory");
-        println!("Folder:[{:?}]", folder);
 
         // 存入父目录节点列表
         folder.0.push(new_meta);
 
         // 更新父目录节点列表
         let mut buf = Vec::new();
-        println!("Folder:[{:?}]", folder);
+        // println!("Folder:[{:?}]", folder);
         folder
             .serialize(&mut rmps::Serializer::new(&mut buf).with_struct_map())
             .unwrap();
@@ -143,14 +158,15 @@ impl FS {
     pub fn ls(self, path: &str) {
         let folder = self.ls_folder(path).expect("No such file or directory");
         let mut table = Table::new();
-        table.add_row(row!["name", "type", "size", "created", "modified"]);
+        table.add_row(row!["名称", "类型", "实际大小","磁盘大小", "创建时间", "修改时间"]);
         folder.0.iter().for_each(|child| {
             table.add_row(row!(
                 child.name,
-                if child.is_dir { "dir" } else { "file" },
+                if child.is_dir { "文件夹" } else { "文件" },
                 humanity_size(child.size),
-                child.created,
-                child.modified
+                humanity_size(child.block_ids.len() as u64 * 4096),
+                format_timestamp(child.created),
+                format_timestamp(child.modified)
             ));
         });
         table.printstd();
@@ -197,7 +213,7 @@ impl FS {
 
     pub fn ls_folder(&self, path: &str) -> Option<FSFolder> {
         let block_ids = self.get_block_ids(path).expect("No such file or directory");
-        println!("block_ids:[{:?}]", block_ids);
+        // println!("block_ids:[{:?}]", block_ids);
         let data = self.read_blocks(block_ids);
         let folder: FSFolder = rmps::from_slice(&data).unwrap();
         Some(folder)
