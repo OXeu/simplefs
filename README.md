@@ -12,3 +12,26 @@
 
 ![layout](imgs/layout.png)
 
+### Inode
+
+```rust
+pub struct Inode {
+    // 1 索引等级,最小为 1,直接指向数据块,当前等级的索引无法满足上限后将索引升一级,最高 255 级
+    pub index_level: u8,
+    pub extra: [u8; 9],
+    pub mode: u16,
+    pub link_count: u32,
+    pub created: u64,
+    pub modified: u64,
+    pub size: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub index_node: IndexNode, // top-level 索引区间
+}
+
+pub struct IndexNode {
+    start_blk: usize,
+    // inclusive
+    len: usize,       // exclusive start_blk + len
+}
+```

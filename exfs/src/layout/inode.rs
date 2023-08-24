@@ -29,29 +29,21 @@ pub const DIR: u16 = 0b0100;
 pub const CHAR_DEVICE: u16 = 0b0010;
 pub const FIFO: u16 = 0b1;
 
+// 64 bytes
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct Inode {
-    // 64 bytes
-    pub index_level: u8,
     // 1 索引等级,最小为 0,直接指向数据块,当当前等级的索引无法满足上限后将索引升一级,最高 255 级
+    pub index_level: u8,
     pub extra: [u8; 9],
-    // 9
     pub mode: u16,
-    // 2 bytes,
     pub link_count: u32,
-    // 4
     pub created: u64,
-    // 8
     pub modified: u64,
-    // 8
     pub size: u64,
-    // 8
     pub uid: u32,
-    // 8
     pub gid: u32,
-    // 8
-    pub index_node: IndexNode, // 8,索引地址
+    pub index_node: IndexNode,
 }
 
 impl Inode {
@@ -62,7 +54,7 @@ impl Inode {
             .expect("Time went backwards").as_secs();
         Self {
             index_level: 0,
-            extra: [0u8;9],
+            extra: [0u8; 9],
             mode,
             link_count: 0,
             created: since_the_epoch,
@@ -74,9 +66,9 @@ impl Inode {
         }
     }
     pub fn nil() -> Self {
-        Self{
+        Self {
             index_level: 0,
-            extra: [0u8;9],
+            extra: [0u8; 9],
             mode: 0,
             link_count: 0,
             created: 0,
@@ -196,7 +188,7 @@ impl IndexNode {
                         .lock()
                         .unwrap()
                         .free();
-                    device.free_block(blk_id, false,true);
+                    device.free_block(blk_id, false, true);
                 }
             } else {
                 device
@@ -212,7 +204,7 @@ impl IndexNode {
                             *v = IndexNode::default();
                         });
                     });
-                device.free_block(blk_id, false,true)
+                device.free_block(blk_id, false, true)
             }
         }
     }
