@@ -10,12 +10,5 @@
 
 ## 文件结构
 
-```mermaid
-graph LR
-    sb[SuperBlock]
-    ib[InodeBitmap]
-    b[DataBitmap]
-    i[InodeBlocks];
-    d[DataBlocks]
-    sb --- ib --- b --- i --- d  
-```
+![layout](imgs/layout.png)
+

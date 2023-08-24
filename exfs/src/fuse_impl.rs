@@ -35,9 +35,6 @@ impl Filesystem for BlockCacheDevice {
         }
     }
 
-    fn forget(&mut self, _req: &Request, _ino: u64, _nlookup: u64) {
-        // debug!("Forget: {}", _ino)
-    }
     fn getattr(&mut self, _req: &Request, _ino: u64, reply: ReplyAttr) {
         let ttl = Timespec::new(60, 0);
         let inode_id = ino_id(_ino);
@@ -160,10 +157,6 @@ impl Filesystem for BlockCacheDevice {
             Ok(_) => reply.ok(),
             Err(e) => reply.error(e),
         }
-    }
-
-    fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, _reply: ReplyEmpty) {
-        // debug!("RmDir: {:?}", _name)
     }
 
     fn symlink(
@@ -359,10 +352,6 @@ impl Filesystem for BlockCacheDevice {
             }
         }
         r.ok()
-    }
-
-    fn statfs(&mut self, _req: &Request, _ino: u64, _reply: ReplyStatfs) {
-        // debug!("StatsFS: {}", _ino)
     }
 
     fn getxattr(
