@@ -5,8 +5,6 @@ use crate::layout::inode::Inode;
 use crate::layout::super_block::SuperBlock;
 use crate::manager::block_cache_manager::BlockCacheDevice;
 
-type BitmapBlock = [u8; BLOCK_SIZE];
-
 #[derive(Eq, PartialEq)]
 pub enum AllocError {
     NoEnoughSpace,
@@ -19,26 +17,31 @@ impl BlockCacheDevice {
     pub fn alloc_block(&mut self, is_inode: bool) -> Option<usize> {
         let super_block = self.super_block();
         let size = if is_inode { super_block.inode_blocks } else { super_block.data_blocks };
-        for id in 0..size {
-            if !self.used(id,is_inode) {
-                self.set(id,is_inode,true);
-                return Some(id)
+        for index in 0..size {
+            if !self.used(index, is_inode) {
+                self.set(index, is_inode, true);
+                let id = if is_inode { index + 1 } else { index };
+                println!("[Alloc{}] {}", if is_inode { "Inode" } else { "Data" }, id);
+                return Some(id);
             }
         };
         None
     }
 
-    pub fn free_block(&mut self, id: usize, is_inode: bool,free_block:bool) {
-        if self.used(id,is_inode) {
-            self.set(id,is_inode, false);
+    pub fn free_block(&mut self, id: usize, is_inode: bool, free_block: bool) {
+        println!("free block: {}, is_inode:{}", id, is_inode);
+        let index = if is_inode { id - 1 } else { id };
+        if self.used(index, is_inode) {
+            self.set(index, is_inode, false);
             if free_block {
                 // 对物理块清理
                 if is_inode {
-                    let (blk_id,offset) = self.inode_block(id);
+                    let (blk_id, offset) = self.inode_block(id);
+                    println!("free inode block: {}, offset:{}", blk_id, offset);
                     self.block_cache(blk_id)
                         .lock()
                         .unwrap()
-                        .modify(offset,|ino:&mut Inode|{
+                        .modify(offset, |ino: &mut Inode| {
                             *ino = Inode::nil()
                         });
                 } else {
@@ -79,36 +82,39 @@ impl BlockCacheDevice {
     }
 
     /// @return (blk_id usize, bytes_offset:usize, bit_offset:usize)
-    fn bitmap_offset(&self, id: usize, is_inode: bool) -> (usize, usize, usize) {
+    fn bitmap_offset(&self, index: usize, is_inode: bool) -> (usize, usize, usize) {
         let range = self.bitmap_range(is_inode);
         let super_block = self.super_block();
         if is_inode {
-            if id > super_block.inode_blocks {
+            if index > super_block.inode_blocks {
                 panic!("out of inode blocks bit range");
             }
         } else {
-            if id > super_block.data_blocks {
+            if index > super_block.data_blocks {
                 panic!("out of data blocks bit range");
             }
         }
-        let blk_id = id / (BLOCK_SIZE * 8);
+        let blk_id = index / (BLOCK_SIZE * 8);
         if blk_id > range.len() {
             // out of bounds
             panic!("out of bounds");
         }
-        let blk_offset = id % (BLOCK_SIZE * 8);
+        let blk_offset = index % (BLOCK_SIZE * 8);
         let blk_bytes_offset = blk_offset / 8;
         let blk_bit_offset = blk_offset % 8;
         (blk_id + range.start, blk_bytes_offset, blk_bit_offset)
     }
 
-    pub fn used(&mut self, id: usize, is_inode: bool) -> bool {
-        let (blk_id, bytes_offset, bit_offset) = self.bitmap_offset(id, is_inode);
+    pub fn used(&mut self, index: usize, is_inode: bool) -> bool {
+        let (blk_id, bytes_offset, bit_offset) = self.bitmap_offset(index, is_inode);
         let mut check = false;
         self.block_cache(blk_id)
             .lock()
             .unwrap()
-            .read(bytes_offset, |byte: &u8| check = byte & 1 << bit_offset > 0);
+            .read(bytes_offset, |byte: &u8| {
+                let mask = 1 << bit_offset;
+                check = byte & mask > 0;
+            });
         check
     }
 
@@ -126,14 +132,14 @@ impl BlockCacheDevice {
             });
     }
 
-    fn clear(&mut self) {
-        let mut super_block = self.super_block();
+    pub fn clear_bitmap(&mut self) {
+        let super_block = self.super_block();
         let bitmap_blocks = super_block.bitmap_blocks + super_block.inode_bitmap_blocks;
         for blk_id in 0..bitmap_blocks {
             self.block_cache(blk_id + 1)
                 .lock()
                 .unwrap()
-                .modify(0, |bytes: &mut BitmapBlock| {
+                .modify(0, |bytes: &mut [u8; BLOCK_SIZE]| {
                     bytes.iter_mut().for_each(|v| {
                         *v = 0;
                     })
@@ -146,15 +152,15 @@ impl BlockCacheDevice {
         let size = super_block.inode_blocks;
         let mut used = Vec::new();
         for id in 0..size {
-            if self.used(id,true) {
-                used.push(id)
+            if self.used(id, true) {
+                used.push(id + 1)
             }
         };
         println!("Used Inode Blocks: {:?}", used);
         let size = super_block.data_blocks;
         let mut used = Vec::new();
         for id in 0..size {
-            if self.used(id,false) {
+            if self.used(id, false) {
                 used.push(id)
             }
         };

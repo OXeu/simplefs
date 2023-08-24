@@ -1,6 +1,5 @@
 use std::mem::size_of;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use time::{now, Timespec};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::BLOCK_SIZE;
 use crate::layout::inode::FileType::{BlockDevice, CharDevice, Dir, File, Socket, SymbolLink, UNK};

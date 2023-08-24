@@ -1,8 +1,6 @@
 #![cfg(test)]
 
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::os::unix::prelude::FileExt;
+use std::fs::OpenOptions;
 use std::sync::{Arc, Mutex};
 
 use crate::block_device::file_device::FileDevice;
@@ -11,7 +9,7 @@ use crate::manager::block_cache_manager::BlockCacheDevice;
 
 #[test]
 fn test() {
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)

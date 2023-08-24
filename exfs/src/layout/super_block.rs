@@ -2,6 +2,7 @@ use crate::config::BLOCK_SIZE;
 use crate::layout::inode::INODE_SIZE;
 
 const MAGIC: usize = 0x0aca_baca_01a7_88cc;
+
 /// 磁盘布局
 /// | SuperBlock | Bitmap | Data Blocks ->| Free Space |<- Inode Blocks |
 /// |     1块    |   n块   |      x块      |     **     |       y块      |
@@ -55,9 +56,11 @@ impl SuperBlock {
     /// inode 块是倒序存储的,内部是顺序存储的
     /// @return block_id(物理),offset
     pub fn inode_block(&self, id: usize) -> (usize, usize) {
+        assert!(id > 0);
+        let id = id - 1;
         let block_cap = BLOCK_SIZE / INODE_SIZE;
         let blk_index = id / block_cap;
-        let inode_blk = self.inode_bitmap_blocks + self.bitmap_blocks + blk_index;
+        let inode_blk = 1 + self.inode_bitmap_blocks + self.bitmap_blocks + blk_index;
         (inode_blk, (id % block_cap) * INODE_SIZE)
     }
 }

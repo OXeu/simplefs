@@ -1,9 +1,9 @@
-use libc::{c_int, free, EBADF, EEXIST, ENOENT, ENOSPC, ENOTDIR};
 use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
+use libc::{c_int, EBADF, EEXIST, ENOENT, ENOSPC, ENOTDIR};
 use lru::LruCache;
 
 use crate::block_device::block_device::BlockDevice;
@@ -93,8 +93,7 @@ impl BlockCacheDevice {
     /// inode 块是倒序存储的,内部是顺序存储的
     /// @return block_id(物理),offset
     pub fn inode_block(&self, id: usize) -> (usize, usize) {
-        let mut super_block: SuperBlock = self.super_block();
-        super_block.inode_block(id)
+        self.super_block().inode_block(id)
     }
 
     pub fn data<T>(&mut self, id: usize, offset: usize, f: impl FnOnce(&T)) {
@@ -192,8 +191,13 @@ impl BlockCacheDevice {
         if new_index.len() <= 1 {
             // top level,save to inode
             self.modify_inode(inode_id, |ino| {
-                ino.index_node = *new_index.first().unwrap();
-                ino.index_level = data_level + 1;
+                if new_index.is_empty() {
+                    ino.index_node = IndexNode::default();
+                    ino.index_level = 0;
+                } else {
+                    ino.index_node = *new_index.first().unwrap();
+                    ino.index_level = data_level + 1;
+                }
             });
             return Ok(());
         }
@@ -216,7 +220,7 @@ impl BlockCacheDevice {
         } else if need_blk_num < index_blk.len() {
             // 缩容
             for _ in need_blk_num..index_blk.len() {
-                self.free_block(index_blk.pop().unwrap(), false,true);
+                self.free_block(index_blk.pop().unwrap(), false, true);
             }
         }
         let mut offset = 0;
@@ -277,7 +281,8 @@ impl BlockCacheDevice {
                 *sb = SuperBlock::new(block_size);
             });
         self.super_block.lock().unwrap().sync();
-        self.print();
+        self.clear_bitmap();
+        // self.print();
         // 创建根节点
         self.mk_root();
         // 同步至磁盘
@@ -285,12 +290,18 @@ impl BlockCacheDevice {
     }
 
     pub fn sync(&mut self) {
-        self.caches.iter().for_each(|(_,c)| c.lock().unwrap().sync())
+        self.caches
+            .iter()
+            .for_each(|(_, c)| c.lock().unwrap().sync());
+        self.device.sync();
     }
 
     fn mk_root(&mut self) {
-        self.alloc_block(true);
-        self.modify_inode(0, |root| *root = Inode::new(DIR << 12 | 0b111101101))
+        let inode = self.alloc_block(true).unwrap();
+        self.modify_inode(inode, |root| {
+            *root = Inode::new(DIR << 12 | 0b111101101);
+            root.size = BLOCK_SIZE as u64
+        })
     }
 }
 
@@ -306,7 +317,7 @@ impl BlockCacheDevice {
         name[..file_name.len()].copy_from_slice(file_name.as_bytes());
         // println!("mk_file: {:?}, parent: {}", name, parent_inode);
         let parent = self.inode(parent_inode);
-        // println!("parent Inode({}):{:?}", parent_inode, parent);
+        println!("parent Inode({}):{:?}", parent_inode, parent);
         if parent.exist() {
             return if parent.is_dir() {
                 let mut dirs = self.dir_list(parent_inode);
@@ -320,17 +331,16 @@ impl BlockCacheDevice {
                     Some(inode_id) => {
                         // println!("Allocated Inode: {}", inode_id);
                         self.print();
-                        self.modify_inode(inode_id, |inode| {
-                            *inode = Inode::new(mode)
-                        });
+                        self.modify_inode(inode_id, |inode| *inode = Inode::new(mode));
                         dirs.push(DirEntry {
                             name,
                             inode: inode_id as u64,
                         });
                         // println!("dirs: {:?}", dirs);
                         let buf: Vec<u8> = vec2slice(dirs);
-                        if let Err(e) =  self.write_inner(0, parent_inode, &buf) {
-                            return Err(e)
+                        if let Err(e) = self.write_all(0, parent_inode, &buf) {
+                            println!("mk_file:339 error: {}", e);
+                            return Err(e);
                         }
                         // let (index_node, level) = self.write_data(buf.as_slice(), 0);
                         // // println!("free {}({})", 5, self.check(5));
@@ -349,6 +359,7 @@ impl BlockCacheDevice {
                 Err(ENOTDIR)
             };
         }
+        println!("mk_file:end error: NotExist");
         Err(ENOENT)
     }
 
@@ -368,7 +379,7 @@ impl BlockCacheDevice {
 
     pub fn lookup(&mut self, parent: usize, name: FileName) -> Result<DirEntry, c_int> {
         match self.ls_(parent) {
-            Ok(mut v) => match v.iter().find(|entry| name == entry.name) {
+            Ok(v) => match v.iter().find(|entry| name == entry.name) {
                 None => Err(ENOENT),
                 Some(e) => Ok(e.clone()),
             },
@@ -386,11 +397,11 @@ impl BlockCacheDevice {
                             let ino_id = entry.inode as usize;
                             let inode = self.inode(ino_id);
                             inode.index_node.delete(self, inode.index_level, true);
-                            self.free_block(ino_id, true,true);
+                            self.free_block(ino_id, true, true);
                         }
                         let mut buf = vec2slice(v);
                         align(&mut buf, BLOCK_SIZE);
-                        return match self.write_inner(0, parent, &buf) {
+                        return match self.write_all(0, parent, &buf) {
                             Ok(_) => Ok(()),
                             Err(e) => Err(e),
                         };
@@ -414,7 +425,7 @@ impl BlockCacheDevice {
             return Ok(());
         }
         match old {
-            Ok(entry) => match self.rm(new_parent, new_name, true) {
+            Ok(entry) => match self.rm(new_parent, new_name, false) {
                 Ok(_) | Err(ENOENT) => {
                     let mut new_dirs = self.dir_list(new_parent);
                     new_dirs.push(DirEntry {
@@ -423,10 +434,10 @@ impl BlockCacheDevice {
                     });
                     let mut buf = vec2slice(new_dirs);
                     align(&mut buf, BLOCK_SIZE);
-                    if let Err(e) = self.write_inner(0, new_parent, &buf) {
+                    if let Err(e) = self.write_all(0, new_parent, &buf) {
                         return Err(e);
                     }
-                    match self.rm(parent, name, false) {
+                    match self.rm(parent, name, true) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e),
                     }

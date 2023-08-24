@@ -1,14 +1,11 @@
 // 物理块缓存层
 
-use crate::block_device::block_device::BlockDevice;
-use crate::config::BLOCK_SIZE;
-use crate::manager::block_cache_manager::trim_zero;
-use libc::sync;
-use std::any::Any;
-use std::any::TypeId;
 use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::Arc;
+
+use crate::block_device::block_device::BlockDevice;
+use crate::config::BLOCK_SIZE;
 use crate::utils::slice::SliceExt;
 
 pub struct CacheBlock {
@@ -21,6 +18,10 @@ pub struct CacheBlock {
 impl CacheBlock {
     pub fn new(device: Arc<dyn BlockDevice>, block: usize) -> Self {
         let mut buf = [0u8; BLOCK_SIZE];
+        // let trim = trim_zero(buf.to_vec());
+        // if !trim.is_empty() {
+        //     println!("NEW:{},buf:{:?}", block, &trim);
+        // }
         device.read(block, &mut buf);
         Self {
             block,
@@ -34,6 +35,9 @@ impl CacheBlock {
         &self.data[offset] as *const _ as usize
     }
     fn get_ref<T: Sized>(&self, offset: usize) -> &T {
+        // use crate::manager::block_cache_manager::trim_zero;
+        // let trim = trim_zero(self.data.to_vec());
+        // println!("READ:{}->({}),buf({}):{:?}", self.block, offset, trim.len(), &trim);
         let type_size = core::mem::size_of::<T>();
         assert!(offset + type_size <= BLOCK_SIZE);
         let addr = self.addr_of_offset(offset);
@@ -44,7 +48,6 @@ impl CacheBlock {
         let type_size = core::mem::size_of::<T>();
         assert!(offset + type_size <= BLOCK_SIZE);
         self.dirty = true;
-        self.sync();
         let addr = self.addr_of_offset(offset);
         unsafe { &mut *(addr as *mut T) }
     }
@@ -60,7 +63,6 @@ impl CacheBlock {
         offset: usize,
         f: impl FnOnce(&mut T) -> V,
     ) -> V {
-        self.dirty = true;
         let blk = self.block;
         let data: &mut T = self.get_mut(offset);
         let data_slice =
@@ -86,13 +88,18 @@ impl CacheBlock {
             for byte in data.iter_mut() {
                 *byte = 0;
             }
+            let trim = data.trim();
+            if !trim.is_empty() {
+                println!("After free: {:?}", trim)
+            }
         });
+        self.sync();
     }
 
     pub fn sync(&mut self) {
         if self.dirty {
             self.dirty = false;
-            self.device.write(self.block, &self.data)
+            self.device.write(self.block, &self.data);
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::io::Write;
-use std::os::unix::fs::FileExt;
+use std::io::{Seek, SeekFrom, Write};
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use crate::block_device::block_device::BlockDevice;
@@ -16,22 +16,20 @@ impl BlockDevice for FileDevice {
     }
 
     fn read(&self, block: usize, buf: &mut [u8]) {
-        if block > 1000000 {
-            println!("block:{}", block);
-        }
-        self.file
-            .lock()
-            .unwrap()
-            .read_at(buf, block as u64 * BLOCK_SIZE as u64)
-            .unwrap();
+        let mut file = self.file.lock().unwrap();
+        file.seek(SeekFrom::Start((block * BLOCK_SIZE) as u64))
+            .expect("Error when seeking!");
+        assert_eq!(file.read(buf).unwrap(), BLOCK_SIZE, "Not a complete block!");
     }
 
-    fn write(&self, block: usize, data: &[u8]) {
-        self.file
-            .lock()
-            .unwrap()
-            .write_at(data, block as u64 * BLOCK_SIZE as u64)
-            .unwrap();
-        let _= self.file.lock().unwrap().flush();
+    fn write(&self, block: usize, buf: &[u8]) {
+        let mut file = self.file.lock().unwrap();
+        file.seek(SeekFrom::Start((block * BLOCK_SIZE) as u64))
+            .expect("Error when seeking!");
+        assert_eq!(file.write(buf).unwrap(), BLOCK_SIZE, "Not a complete block!");
+    }
+
+    fn sync(&self) {
+        let _ = self.file.lock().unwrap().sync_all();
     }
 }
