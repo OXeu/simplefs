@@ -56,7 +56,7 @@ impl Inode {
             index_level: 0,
             extra: [0u8; 9],
             mode,
-            link_count: 0,
+            link_count: 1,
             created: since_the_epoch,
             modified: since_the_epoch,
             size: 0,

@@ -411,15 +411,18 @@ impl BlockCacheDevice {
         }
     }
 
-    pub fn rm(&mut self, parent: usize, name: FileName, keep_file: bool) -> Result<(), c_int> {
+    pub fn rm(&mut self, parent: usize, name: FileName) -> Result<(), c_int> {
         match self.ls_(parent) {
             Ok(mut v) => {
                 for (id, entry) in v.clone().iter().enumerate() {
                     if entry.name == name {
                         v.remove(id);
-                        if !keep_file {
-                            let ino_id = entry.inode as usize;
-                            let inode = self.inode(ino_id);
+                        let ino_id = entry.inode as usize;
+                        let inode = self.modify_inode(ino_id,|inode|{
+                            inode.link_count -= 1;
+                            inode.clone()
+                        });
+                        if inode.link_count == 0 {
                             inode.index_node.delete(self, inode.index_level, true);
                             self.free_block(ino_id, true, true);
                         }
@@ -449,7 +452,7 @@ impl BlockCacheDevice {
             return Ok(());
         }
         match old {
-            Ok(entry) => match self.rm(new_parent, new_name, false) {
+            Ok(entry) => match self.rm(new_parent, new_name) {
                 Ok(_) | Err(ENOENT) => {
                     let mut new_dirs = self.dir_list(new_parent);
                     new_dirs.push(DirEntry {
@@ -461,7 +464,7 @@ impl BlockCacheDevice {
                     if let Err(e) = self.write_all(0, new_parent, &buf, true) {
                         return Err(e);
                     }
-                    match self.rm(parent, name, true) {
+                    match self.rm(parent, name) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e),
                     }

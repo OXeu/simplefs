@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 exfs = { path = "../exfs"}
-fuse = "0.3.1"
 env_logger = "0.6.0"
+fuser = "0.7"

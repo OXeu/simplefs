@@ -15,6 +15,7 @@
 ### Inode
 
 ```rust
+// 存储在 Inode Blocks 区
 pub struct Inode {
     // 1 索引等级,最小为 1,直接指向数据块,当前等级的索引无法满足上限后将索引升一级,最高 255 级
     pub index_level: u8,
@@ -29,6 +30,7 @@ pub struct Inode {
     pub index_node: IndexNode, // top-level 索引区间
 }
 
+// 存储在 Data Blocks
 pub struct IndexNode {
     start_blk: usize,
     // inclusive

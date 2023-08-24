@@ -9,5 +9,5 @@ pub mod cache;
 pub mod manager;
 pub mod layout;
 pub mod test;
-pub mod fuse_impl;
 pub mod utils;
+pub mod fuse_impl;

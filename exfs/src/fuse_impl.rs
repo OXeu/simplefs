@@ -3,14 +3,14 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fuse::{
+use fuser::{
     FileAttr, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request,
+    ReplyEntry, ReplyOpen, ReplyWrite, ReplyXattr, Request, TimeOrNow,
 };
-use libc::{EEXIST, ENOENT, O_RDWR};
+use libc::{EEXIST, ENOENT, ENOTSUP, O_RDWR};
 use log::debug;
-use time::Timespec;
 
 use crate::cache::file_handler::FileHandler;
 use crate::layout::data_block::{DirEntry, FileName};
@@ -20,8 +20,12 @@ use crate::utils::slice::vec2slice;
 
 impl Filesystem for BlockCacheDevice {
     fn lookup(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEntry) {
+        // info!(
+        //     "lookup request: {:?}; parent: {}, name: {:?}",
+        //     _req, _parent, _name
+        // );
         // debug!("parent:{},req:{:?},name:{:?}", _parent, _req, _name);
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         let r = reply;
         match self.lookup_inter(ino_id(_parent), name2(_name)) {
             Ok(entry) => {
@@ -36,7 +40,7 @@ impl Filesystem for BlockCacheDevice {
     }
 
     fn getattr(&mut self, _req: &Request, _ino: u64, reply: ReplyAttr) {
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         let inode_id = ino_id(_ino);
         let inode = self.inode(inode_id);
         let attr = file_attr(inode, _ino);
@@ -51,12 +55,13 @@ impl Filesystem for BlockCacheDevice {
         _uid: Option<u32>,
         _gid: Option<u32>,
         _size: Option<u64>,
-        _atime: Option<Timespec>,
-        _mtime: Option<Timespec>,
+        _atime: Option<TimeOrNow>,
+        _mtime: Option<TimeOrNow>,
+        _ctime: Option<SystemTime>,
         _fh: Option<u64>,
-        _crtime: Option<Timespec>,
-        _chgtime: Option<Timespec>,
-        _bkuptime: Option<Timespec>,
+        _crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
         _flags: Option<u32>,
         reply: ReplyAttr,
     ) {
@@ -77,14 +82,14 @@ impl Filesystem for BlockCacheDevice {
             //     // ino. = v
             // }
             if let Some(v) = _mtime {
-                ino.modified = v.sec as u64
+                ino.modified = time_sec(v)
             }
             if let Some(v) = _crtime {
-                ino.created = v.sec as u64
+                ino.created = time_sys(v)
             }
             ino.clone()
         });
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         reply.attr(&ttl, &file_attr(inode, _ino))
     }
 
@@ -100,6 +105,7 @@ impl Filesystem for BlockCacheDevice {
         _parent: u64,
         _name: &OsStr,
         _mode: u32,
+        _umask: u32,
         _rdev: u32,
         reply: ReplyEntry,
     ) {
@@ -108,7 +114,7 @@ impl Filesystem for BlockCacheDevice {
             ino_id(_parent),
             FILE << 12 | _mode as u16,
         );
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         match file {
             Ok(v) => {
                 let inode = self.inode(v);
@@ -129,6 +135,7 @@ impl Filesystem for BlockCacheDevice {
         _parent: u64,
         _name: &OsStr,
         _mode: u32,
+        _umask: u32,
         reply: ReplyEntry,
     ) {
         let folder = self.mk_file(
@@ -136,7 +143,7 @@ impl Filesystem for BlockCacheDevice {
             ino_id(_parent),
             DIR << 12 | _mode as u16,
         );
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         match folder {
             Ok(v) => {
                 let inode = self.inode(v);
@@ -153,7 +160,7 @@ impl Filesystem for BlockCacheDevice {
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
         let parent_id = ino_id(_parent);
-        match self.rm(parent_id, name2(_name), false) {
+        match self.rm(parent_id, name2(_name)) {
             Ok(_) => reply.ok(),
             Err(e) => reply.error(e),
         }
@@ -173,7 +180,7 @@ impl Filesystem for BlockCacheDevice {
             ino_id(_parent),
             SYMBOL << 12 | 0o744u16,
         );
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         match symbol {
             Ok(v) => {
                 let buf = _link.to_str().unwrap();
@@ -199,6 +206,7 @@ impl Filesystem for BlockCacheDevice {
         _name: &OsStr,
         _newparent: u64,
         _newname: &OsStr,
+        _flags: u32,
         reply: ReplyEmpty,
     ) {
         let parent = ino_id(_parent);
@@ -217,6 +225,7 @@ impl Filesystem for BlockCacheDevice {
         _newname: &OsStr,
         reply: ReplyEntry,
     ) {
+        println!("FFFFFFFFFF");
         let inode_id = ino_id(_ino);
         let parent_id = ino_id(_newparent);
         let mut dirs = self.dir_list(parent_id);
@@ -233,21 +242,19 @@ impl Filesystem for BlockCacheDevice {
                     return;
                 }
                 let inode = self.inode(inode_id);
-                let ttl = Timespec::new(60, 0);
+                let ttl = Duration::new(60, 0);
                 reply.entry(&ttl, &file_attr(inode, _ino), 0)
             }
-            Ok(_) => {
-                reply.error(EEXIST)
-            }
+            Ok(_) => reply.error(EEXIST),
             Err(e) => {
                 reply.error(e);
             }
         }
     }
 
-    fn open(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         let fh = self.open_inner(ino_id(_ino), 0, _flags as u16);
-        reply.opened(fh, _flags)
+        reply.opened(fh, _flags as u32)
     }
 
     fn read(
@@ -257,6 +264,8 @@ impl Filesystem for BlockCacheDevice {
         _fh: u64,
         _offset: i64,
         _size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         let mut buf: Vec<u8> = Vec::new();
@@ -280,7 +289,9 @@ impl Filesystem for BlockCacheDevice {
         _fh: u64,
         _offset: i64,
         _data: &[u8],
-        _flags: u32,
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
         match self.write_inner(_offset as usize, ino_id(_ino), _data) {
@@ -299,8 +310,8 @@ impl Filesystem for BlockCacheDevice {
         _req: &Request,
         _ino: u64,
         _fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -310,7 +321,7 @@ impl Filesystem for BlockCacheDevice {
         }
     }
 
-    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         // debug!("OpenDir: {}", _ino);
         reply.opened(_ino, O_RDWR as u32);
     }
@@ -330,16 +341,16 @@ impl Filesystem for BlockCacheDevice {
         }
         match self.ls_(ino_id(_ino)) {
             Ok(v) => {
-                r.add(
+                let _ = r.add(
                     _ino,
                     1,
-                    fuse::FileType::Directory,
+                    fuser::FileType::Directory,
                     OsString::from_str("..").unwrap(),
                 );
                 for entry in v {
                     debug!("DirEntry: {:?} ({})", name(entry.name), entry.inode);
                     let inode = self.inode(entry.inode as usize);
-                    r.add(
+                    let _ = r.add(
                         entry.inode,
                         1,
                         file_type(inode.file_type()),
@@ -363,10 +374,10 @@ impl Filesystem for BlockCacheDevice {
         reply: ReplyXattr,
     ) {
         // debug!("GetXAttr: {}", _ino);
-        reply.size(0)
+        reply.error(ENOTSUP);
     }
 
-    fn access(&mut self, _req: &Request, _ino: u64, _mask: u32, reply: ReplyEmpty) {
+    fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
         // debug!("Access: {}", _ino);
         reply.ok()
     }
@@ -377,7 +388,8 @@ impl Filesystem for BlockCacheDevice {
         _parent: u64,
         _name: &OsStr,
         _mode: u32,
-        _flags: u32,
+        _umask: u32,
+        _flags: i32,
         reply: ReplyCreate,
     ) {
         let file = self.mk_file(
@@ -385,14 +397,14 @@ impl Filesystem for BlockCacheDevice {
             ino_id(_parent),
             FILE << 12 | _mode as u16,
         );
-        let ttl = Timespec::new(60, 0);
+        let ttl = Duration::new(60, 0);
         match file {
             Ok(v) => {
                 let inode = self.inode(v);
                 let attr = file_attr(inode, id_ino(v));
                 let fh = self.open_inner(v, 0, _flags as u16);
                 // debug!("Create: v:{}, {:#?}", v, attr);
-                reply.created(&ttl, &attr, 0, fh, _flags);
+                reply.created(&ttl, &attr, 0, fh, _flags as u32);
             }
             Err(e) => {
                 debug!("Create error: {:?}", e);
@@ -402,16 +414,16 @@ impl Filesystem for BlockCacheDevice {
     }
 }
 
-fn file_type(typ: FileType) -> fuse::FileType {
+fn file_type(typ: FileType) -> fuser::FileType {
     match typ {
-        FileType::Socket => fuse::FileType::Socket,
-        FileType::SymbolLink => fuse::FileType::Symlink,
-        FileType::File => fuse::FileType::RegularFile,
-        FileType::BlockDevice => fuse::FileType::BlockDevice,
-        FileType::Dir => fuse::FileType::Directory,
-        FileType::CharDevice => fuse::FileType::CharDevice,
-        FileType::FIFO => fuse::FileType::NamedPipe,
-        FileType::UNK => fuse::FileType::RegularFile,
+        FileType::Socket => fuser::FileType::Socket,
+        FileType::SymbolLink => fuser::FileType::Symlink,
+        FileType::File => fuser::FileType::RegularFile,
+        FileType::BlockDevice => fuser::FileType::BlockDevice,
+        FileType::Dir => fuser::FileType::Directory,
+        FileType::CharDevice => fuser::FileType::CharDevice,
+        FileType::FIFO => fuser::FileType::NamedPipe,
+        FileType::UNK => fuser::FileType::RegularFile,
     }
 }
 
@@ -439,16 +451,18 @@ fn file_attr(inode: Inode, _ino: u64) -> FileAttr {
         ino: _ino,
         size: inode.size,
         blocks: inode.blocks(),
-        atime: Timespec::new(inode.modified as i64, 0),
-        mtime: Timespec::new(inode.modified as i64, 0),
-        ctime: Timespec::new(inode.created as i64, 0),
-        crtime: Timespec::new(inode.created as i64, 0),
+        atime: system_time_from_time(inode.modified as i64, 0),
+        mtime: system_time_from_time(inode.modified as i64, 0),
+        ctime: system_time_from_time(inode.created as i64, 0),
+        crtime: system_time_from_time(inode.created as i64, 0),
         perm: mode,
         kind: file_type(inode.file_type()),
         nlink: inode.link_count,
         uid: inode.uid,
         gid: inode.gid,
         rdev: 0,
+        blksize: 0,
+        padding: 0,
         flags: 0,
     }
 }
@@ -459,4 +473,24 @@ fn ino_id(ino_: u64) -> usize {
 
 fn id_ino(inode_id: usize) -> u64 {
     (inode_id) as u64
+}
+
+fn time_sec(t: TimeOrNow) -> u64 {
+    match t {
+        TimeOrNow::SpecificTime(v) => time_sys(v),
+        TimeOrNow::Now => time_sys(SystemTime::now()),
+    }
+}
+
+fn time_sys(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+
+fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
+    if secs >= 0 {
+        SystemTime::UNIX_EPOCH + Duration::new(secs as u64, nsecs)
+    } else {
+        SystemTime::UNIX_EPOCH - Duration::new((-secs) as u64, nsecs)
+    }
 }
