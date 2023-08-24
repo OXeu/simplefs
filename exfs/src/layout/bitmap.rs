@@ -1,4 +1,5 @@
 use std::ops::Range;
+use log::debug;
 
 use crate::config::BLOCK_SIZE;
 use crate::layout::inode::Inode;
@@ -21,7 +22,7 @@ impl BlockCacheDevice {
             if !self.used(index, is_inode) {
                 self.set(index, is_inode, true);
                 let id = if is_inode { index + 1 } else { index };
-                println!("[Alloc{}] {}", if is_inode { "Inode" } else { "Data" }, id);
+                debug!("[Alloc{}] {}", if is_inode { "Inode" } else { "Data" }, id);
                 return Some(id);
             }
         };
@@ -29,7 +30,7 @@ impl BlockCacheDevice {
     }
 
     pub fn free_block(&mut self, id: usize, is_inode: bool, free_block: bool) {
-        println!("free block: {}, is_inode:{}", id, is_inode);
+        debug!("free block: {}, is_inode:{}", id, is_inode);
         let index = if is_inode { id - 1 } else { id };
         if self.used(index, is_inode) {
             self.set(index, is_inode, false);
@@ -37,7 +38,7 @@ impl BlockCacheDevice {
                 // 对物理块清理
                 if is_inode {
                     let (blk_id, offset) = self.inode_block(id);
-                    println!("free inode block: {}, offset:{}", blk_id, offset);
+                    debug!("free inode block: {}, offset:{}", blk_id, offset);
                     self.block_cache(blk_id)
                         .lock()
                         .unwrap()
@@ -55,7 +56,7 @@ impl BlockCacheDevice {
             return;
         }
         // 重复释放
-        println!(
+        debug!(
             "Try to release the free {} block({})!",
             if is_inode { "Inode" } else { "Data" },
             id
@@ -156,7 +157,7 @@ impl BlockCacheDevice {
                 used.push(id + 1)
             }
         };
-        println!("Used Inode Blocks: {:?}", used);
+        debug!("Used Inode Blocks: {:?}", used);
         let size = super_block.data_blocks;
         let mut used = Vec::new();
         for id in 0..size {
@@ -164,6 +165,6 @@ impl BlockCacheDevice {
                 used.push(id)
             }
         };
-        println!("Used Data Blocks: {:?}", used);
+        debug!("Used Data Blocks: {:?}", used);
     }
 }

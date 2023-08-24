@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use libc::{c_int, EBADF, EEXIST, ENOENT, ENOSPC, ENOTDIR};
+use log::debug;
 use lru::LruCache;
 
 use crate::block_device::block_device::BlockDevice;
@@ -124,20 +125,43 @@ impl BlockCacheDevice {
     }
 
     /// id: inode id
-    pub fn dir_list(&mut self, id: usize) -> Vec<DirEntry> {
+    pub fn read_all(&mut self, id: usize) -> Vec<u8> {
         let inode = self.inode(id);
-        let mut entries = Vec::new();
-        // println!("dir list: {:?},{}", inode.index_node, inode.index_level);
+        let mut data_ = Vec::new();
+        // debug!("dir list: {:?},{}", inode.index_node, inode.index_level);
         inode
             .index_node
             .list(self, inode.index_level)
             .iter()
             .for_each(|v| {
-                // println!("data blocks: {}", v);
+                // debug!("data blocks: {}", v);
+                self.block_cache(self.data_block(*v)).lock().unwrap().read(
+                    0,
+                    |data: &[u8;BLOCK_SIZE]| {
+                        data.iter()
+                            .for_each(|v| data_.push(*v))
+                    },
+                );
+            });
+        data_.truncate(inode.size as usize);
+        data_
+    }
+
+    /// id: inode id
+    pub fn dir_list(&mut self, id: usize) -> Vec<DirEntry> {
+        let inode = self.inode(id);
+        let mut entries = Vec::new();
+        // debug!("dir list: {:?},{}", inode.index_node, inode.index_level);
+        inode
+            .index_node
+            .list(self, inode.index_level)
+            .iter()
+            .for_each(|v| {
+                // debug!("data blocks: {}", v);
                 self.block_cache(self.data_block(*v)).lock().unwrap().read(
                     0,
                     |dirs: &[DirEntry; BLOCK_SIZE / DIR_ENTRY_SIZE]| {
-                        // println!("dir entries: {:?}", dirs);
+                        // debug!("dir entries: {:?}", dirs);
                         dirs.iter()
                             .filter(|v| !v.name.is_empty() && v.inode != 0)
                             .for_each(|dir| entries.push(*dir))
@@ -187,7 +211,7 @@ impl BlockCacheDevice {
         data_level: u8,
     ) -> Result<(), c_int> {
         let new_index = IndexNode::from(data_blocks.clone());
-        // println!("Index node：{:?},data:{:?}", new_index, data_blocks);
+        // debug!("Index node：{:?},data:{:?}", new_index, data_blocks);
         if new_index.len() <= 1 {
             // top level,save to inode
             self.modify_inode(inode_id, |ino| {
@@ -315,13 +339,13 @@ impl BlockCacheDevice {
     ) -> Result<usize, c_int> {
         let mut name = [0u8; 56];
         name[..file_name.len()].copy_from_slice(file_name.as_bytes());
-        // println!("mk_file: {:?}, parent: {}", name, parent_inode);
+        // debug!("mk_file: {:?}, parent: {}", name, parent_inode);
         let parent = self.inode(parent_inode);
-        println!("parent Inode({}):{:?}", parent_inode, parent);
+        debug!("parent Inode({}):{:?}", parent_inode, parent);
         if parent.exist() {
             return if parent.is_dir() {
                 let mut dirs = self.dir_list(parent_inode);
-                // println!("dirs0: {:?}", dirs);
+                // debug!("dirs0: {:?}", dirs);
                 if dirs.iter().any(|v| v.name.as_slice() == name) {
                     return Err(EEXIST);
                 }
@@ -329,21 +353,21 @@ impl BlockCacheDevice {
                 match inode_opt {
                     None => return Err(ENOSPC),
                     Some(inode_id) => {
-                        // println!("Allocated Inode: {}", inode_id);
+                        // debug!("Allocated Inode: {}", inode_id);
                         self.print();
                         self.modify_inode(inode_id, |inode| *inode = Inode::new(mode));
                         dirs.push(DirEntry {
                             name,
                             inode: inode_id as u64,
                         });
-                        // println!("dirs: {:?}", dirs);
+                        // debug!("dirs: {:?}", dirs);
                         let buf: Vec<u8> = vec2slice(dirs);
                         if let Err(e) = self.write_all(0, parent_inode, &buf, true) {
-                            println!("mk_file:339 error: {}", e);
+                            debug!("mk_file:339 error: {}", e);
                             return Err(e);
                         }
                         // let (index_node, level) = self.write_data(buf.as_slice(), 0);
-                        // // println!("free {}({})", 5, self.check(5));
+                        // // debug!("free {}({})", 5, self.check(5));
                         // parent.index_node.delete(self, parent.index_level, false); // 删除原数据
                         // self.modify_inode(parent_inode, |p| {
                         //     p.index_node = index_node;
@@ -351,7 +375,7 @@ impl BlockCacheDevice {
                         //     p.size = buf.len() as u64;
                         // });
                         // let parent = self.inode(parent_inode);
-                        // println!("parent ({}) -> {:?}", parent_inode, parent);
+                        // debug!("parent ({}) -> {:?}", parent_inode, parent);
                         return Ok(inode_id);
                     }
                 }
@@ -359,12 +383,12 @@ impl BlockCacheDevice {
                 Err(ENOTDIR)
             };
         }
-        println!("mk_file:end error: NotExist");
+        debug!("mk_file:end error: NotExist");
         Err(ENOENT)
     }
 
     pub fn ls_(&mut self, inode_id: usize) -> Result<Vec<DirEntry>, c_int> {
-        // println!("ls_ {}",inode_id);
+        // debug!("ls_ {}",inode_id);
         let inode = self.inode(inode_id);
         if inode.exist() {
             if inode.is_dir() {
@@ -377,7 +401,7 @@ impl BlockCacheDevice {
         }
     }
 
-    pub fn lookup(&mut self, parent: usize, name: FileName) -> Result<DirEntry, c_int> {
+    pub fn lookup_inter(&mut self, parent: usize, name: FileName) -> Result<DirEntry, c_int> {
         match self.ls_(parent) {
             Ok(v) => match v.iter().find(|entry| name == entry.name) {
                 None => Err(ENOENT),
@@ -420,7 +444,7 @@ impl BlockCacheDevice {
         new_parent: usize,
         new_name: FileName,
     ) -> Result<(), c_int> {
-        let old = self.lookup(parent, name);
+        let old = self.lookup_inter(parent, name);
         if parent == new_parent && name == new_name {
             return Ok(());
         }

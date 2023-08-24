@@ -8,6 +8,10 @@ pub fn vec2slice<T: Sized>(data: Vec<T>) -> Vec<u8> {
         .collect()
 }
 
+pub fn slice<T: Sized>(data: &T) -> &'static [u8] {
+    unsafe { std::slice::from_raw_parts(data as *const T as *const u8, size_of::<T>()) }
+}
+
 pub trait SliceExt {
     fn trim(&self) -> &Self;
 }

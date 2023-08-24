@@ -2,6 +2,7 @@
 
 use std::fs::OpenOptions;
 use std::sync::{Arc, Mutex};
+use log::debug;
 
 use crate::block_device::file_device::FileDevice;
 use crate::layout::inode::DIR;
@@ -30,16 +31,16 @@ fn test() {
 }
 
 fn ls(fs: &mut BlockCacheDevice, path: &str) {
-    println!("ls: {}", path);
+    debug!("ls: {}", path);
     match fs.ls(path) {
         Ok(iter) => {
             if iter.len() == 0 {
-                println!("[Empty]")
+                debug!("[Empty]")
             } else {
-                iter.iter().for_each(|v| println!("{}    {:?}     {}", v.name, v.inode.file_type(), v.inode_id));
+                iter.iter().for_each(|v| debug!("{}    {:?}     {}", v.name, v.inode.file_type(), v.inode_id));
             }
         }
-        Err(e) => println!("[error] {:?}",e)
+        Err(e) => debug!("[error] {:?}",e)
     }
 }
 

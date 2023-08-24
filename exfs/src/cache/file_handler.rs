@@ -79,7 +79,7 @@ impl BlockCacheDevice {
         for i in 0..write_times {
             let offset = offset_mut % BLOCK_SIZE;
             let end = BLOCK_SIZE.min(len - i * BLOCK_SIZE - offset);
-            // println!("Verbose: {}..{},{},{},{}", offset, end, len, i * BLOCK_SIZE, len.min((i + 1) * BLOCK_SIZE));
+            // debug!("Verbose: {}..{},{},{},{}", offset, end, len, i * BLOCK_SIZE, len.min((i + 1) * BLOCK_SIZE));
             // 需要写几块
             let length = end - offset;
             self.modify_data(data[blk + i], |data: &mut [u8; BLOCK_SIZE]| {

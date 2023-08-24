@@ -13,13 +13,13 @@ fn main() {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
-        .truncate(true)
+        // .create(true)
+        // .truncate(true)
         .open("fs.img")
         .unwrap();
     file.set_len(1024 * 4096 * 2).unwrap();
     let mut fs = BlockCacheDevice::new(Arc::new(FileDevice { file:Arc::new(Mutex::new(file)) }));
-    fs.mkfs(1024);
+    // fs.mkfs(1024);
     fs.print();
 
     env_logger::init();

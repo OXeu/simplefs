@@ -21,13 +21,13 @@ use crate::manager::block_cache_manager::BlockCacheDevice;
 /// set gid        ____ _1_ 新创建的文件将继承目录的组所有权
 /// sticky bit     ____ __1 只有文件所有者和超级用户才能删除该目录中的文件
 
-const SOCKET: u16 = 0b1100;
-const SYMBOL: u16 = 0b1010;
+pub const SOCKET: u16 = 0b1100;
+pub const SYMBOL: u16 = 0b1010;
 pub const FILE: u16 = 0b1000;
-const BLOCK_DEVICE: u16 = 0b0110;
+pub const BLOCK_DEVICE: u16 = 0b0110;
 pub const DIR: u16 = 0b0100;
-const CHAR_DEVICE: u16 = 0b0010;
-const FIFO: u16 = 0b1;
+pub const CHAR_DEVICE: u16 = 0b0010;
+pub const FIFO: u16 = 0b1;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -138,7 +138,7 @@ impl IndexNode {
     pub fn list(&self, device: &mut BlockCacheDevice, level: u8) -> Vec<usize> {
         let mut vec = Vec::new();
         for blk_id in self.start_blk..(self.start_blk + self.len) {
-            // println!("blk_id {}", blk_id);
+            // debug!("blk_id {}", blk_id);
             if level <= 1 {
                 // 一级索引直接将块 id 返回
                 vec.push(blk_id)
@@ -186,7 +186,7 @@ impl IndexNode {
     /// keep_data: 是否保留 DataBlock
     pub fn delete(&self, device: &mut BlockCacheDevice, level: u8, keep_data: bool) {
         for blk_id in self.start_blk..(self.start_blk + self.len) {
-            // println!("{},{}->{}",blk_id,self.start_blk,self.start_blk +self.len);
+            // debug!("{},{}->{}",blk_id,self.start_blk,self.start_blk +self.len);
             if level <= 1 {
                 // 数据块 id
                 if !keep_data {

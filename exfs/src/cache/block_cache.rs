@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::Arc;
+use log::debug;
 
 use crate::block_device::block_device::BlockDevice;
 use crate::config::BLOCK_SIZE;
@@ -20,7 +21,7 @@ impl CacheBlock {
         let mut buf = [0u8; BLOCK_SIZE];
         // let trim = trim_zero(buf.to_vec());
         // if !trim.is_empty() {
-        //     println!("NEW:{},buf:{:?}", block, &trim);
+        //     debug!("NEW:{},buf:{:?}", block, &trim);
         // }
         device.read(block, &mut buf);
         Self {
@@ -37,7 +38,7 @@ impl CacheBlock {
     fn get_ref<T: Sized>(&self, offset: usize) -> &T {
         // use crate::manager::block_cache_manager::trim_zero;
         // let trim = trim_zero(self.data.to_vec());
-        // println!("READ:{}->({}),buf({}):{:?}", self.block, offset, trim.len(), &trim);
+        // debug!("READ:{}->({}),buf({}):{:?}", self.block, offset, trim.len(), &trim);
         let type_size = core::mem::size_of::<T>();
         assert!(offset + type_size <= BLOCK_SIZE);
         let addr = self.addr_of_offset(offset);
@@ -69,16 +70,16 @@ impl CacheBlock {
             unsafe { std::slice::from_raw_parts(data as *const T as *const u8, size_of::<T>()) };
         let data_mm = data_slice.trim();
         if data_slice.len() < BLOCK_SIZE {
-            println!("({}->{})【Before】{:?}", blk, offset, &data);
+            debug!("({}->{})【Before】{:?}", blk, offset, &data);
         } else if data_mm.len() > 0 {
-            println!("({}->{})【Before】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
+            debug!("({}->{})【Before】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
         }
         let v = f(data);
         let data_mm = data_slice.trim();
         if data_slice.len() < BLOCK_SIZE {
-            println!("({}->{})【After】{:?}", blk, offset, &data);
+            debug!("({}->{})【After】{:?}", blk, offset, &data);
         } else if data_mm.len() > 0 {
-            println!("({}->{})【After】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
+            debug!("({}->{})【After】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
         }
         self.sync(); // 关缓存
         v
@@ -90,7 +91,7 @@ impl CacheBlock {
             }
             let trim = data.trim();
             if !trim.is_empty() {
-                println!("After free: {:?}", trim)
+                debug!("After free: {:?}", trim)
             }
         });
         self.sync();
