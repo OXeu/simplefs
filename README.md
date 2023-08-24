@@ -1,12 +1,11 @@
-<h1 align="center"> Exfs </h1>
-<p align="center"> Extensive FileSystem </p>
+<h1 align="center"> VAFS </h1>
+<p align="center"> Vast FileSystem </p>
 
 ## 特性
 
-- [x] 多级索引，可退化为直接索引，最高支持 256 级索引
+- [x] 多级索引，可退化为直接索引，理论最高支持 256 级索引，64 ZB文件最多使用 8 级索引
 - [x] 区间索引
-- [x] 无单文件大小限制（理论最小文件大小上限 $256^ {255} * 4\space KB = 4.9*10 ^{611}\space GB = 4.8 * 10 ^{608}\space
-  TB$
+- [x] 单文件大小上限(寻址上限) $ 2^{64} * 4\space KB = 64 ZB $
 - [x] 文件块缓存
 
 ## 文件结构

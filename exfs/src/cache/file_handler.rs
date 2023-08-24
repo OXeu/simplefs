@@ -46,38 +46,16 @@ impl FileHandler {
 
 impl BlockCacheDevice {
     pub fn write_inner(&mut self, offset: usize, inode: usize, buf: &[u8]) -> Result<(), c_int> {
-        let mut data = self.inode_data_blk_list(inode);
-        let blk = offset / BLOCK_SIZE;
-        let len = buf.len();
-        let need_blk = (offset + len + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        if need_blk > data.len() {
-            // 申请空间
-            for _ in data.len()..need_blk {
-                match self.alloc_block(false) {
-                    None => return Err(ENOSPC),
-                    Some(data_id) => data.push(data_id),
-                }
-            }
-        }
-        let offset_part = offset % BLOCK_SIZE;
-        let mut offset_mut = offset;
-        let write_times = (offset_part + len + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        for i in 0..write_times {
-            let offset = offset_mut % BLOCK_SIZE;
-            let end = BLOCK_SIZE.min(len - i * BLOCK_SIZE - offset);
-            // println!("Verbose: {}..{},{},{},{}", offset, end, len, i * BLOCK_SIZE, len.min((i + 1) * BLOCK_SIZE));
-            // 需要写几块
-            let length = end - offset;
-            self.modify_data(data[blk + i], |data: &mut [u8; BLOCK_SIZE]| {
-                data[offset..end]
-                    .copy_from_slice(&buf[i * BLOCK_SIZE..len.min((i + 1) * BLOCK_SIZE)]);
-            });
-            offset_mut += length
-        }
-        self.make_index_part(inode, data, 0)
+        self.write_all(offset, inode, buf, false)
     }
-    // 末尾直接截断
-    pub fn write_all(&mut self, offset: usize, inode: usize, buf: &[u8]) -> Result<(), c_int> {
+    /// scale: 是否根据 buf 和 offset 重新调整大小
+    pub fn write_all(
+        &mut self,
+        offset: usize,
+        inode: usize,
+        buf: &[u8],
+        scale: bool,
+    ) -> Result<(), c_int> {
         let mut data = self.inode_data_blk_list(inode);
         let blk = offset / BLOCK_SIZE;
         let len = buf.len();
@@ -90,9 +68,9 @@ impl BlockCacheDevice {
                     Some(data_id) => data.push(data_id),
                 }
             }
-        } else if need_blk < data.len() {
+        } else if need_blk < data.len() && scale {
             for _ in need_blk..data.len() {
-                self.free_block(data.pop().unwrap(),false,true);
+                self.free_block(data.pop().unwrap(), false, true);
             }
         }
         let offset_part = offset % BLOCK_SIZE;
@@ -110,6 +88,13 @@ impl BlockCacheDevice {
             });
             offset_mut += length
         }
+        self.modify_inode(inode, |ino| {
+            ino.size = if scale {
+                offset_mut as u64
+            } else {
+                (offset_mut as u64).max(ino.size)
+            }
+        });
         self.make_index_part(inode, data, 0)
     }
 }

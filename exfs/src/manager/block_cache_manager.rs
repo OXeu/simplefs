@@ -338,7 +338,7 @@ impl BlockCacheDevice {
                         });
                         // println!("dirs: {:?}", dirs);
                         let buf: Vec<u8> = vec2slice(dirs);
-                        if let Err(e) = self.write_all(0, parent_inode, &buf) {
+                        if let Err(e) = self.write_all(0, parent_inode, &buf, true) {
                             println!("mk_file:339 error: {}", e);
                             return Err(e);
                         }
@@ -401,7 +401,7 @@ impl BlockCacheDevice {
                         }
                         let mut buf = vec2slice(v);
                         align(&mut buf, BLOCK_SIZE);
-                        return match self.write_all(0, parent, &buf) {
+                        return match self.write_all(0, parent, &buf, true) {
                             Ok(_) => Ok(()),
                             Err(e) => Err(e),
                         };
@@ -434,7 +434,7 @@ impl BlockCacheDevice {
                     });
                     let mut buf = vec2slice(new_dirs);
                     align(&mut buf, BLOCK_SIZE);
-                    if let Err(e) = self.write_all(0, new_parent, &buf) {
+                    if let Err(e) = self.write_all(0, new_parent, &buf, true) {
                         return Err(e);
                     }
                     match self.rm(parent, name, true) {
