@@ -1,5 +1,5 @@
-<h1 style="text-align:center;"> Exfs </h1>
-<p style="text-align:center;"> Extensive FileSystem</p>
+<h1 align="center"> Exfs </h1>
+<p align="center"> Extensive FileSystem </p>
 
 ## 特性
 
