@@ -5,4 +5,4 @@ umount "$FS"
 rm -rf "$FS"
 mkdir "$FS"
 cd "$WORK_DIR" || exit
-RUST_BACKTRACE=1 RUST_LOG=debug cargo run --package fuse_test --bin fuse_test -- fs
+RUST_BACKTRACE=1 RUST_LOG=debug ~/.cargo/bin/cargo run --package fuse_test --bin fuse_test -- fs

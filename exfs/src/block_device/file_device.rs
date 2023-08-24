@@ -32,6 +32,6 @@ impl BlockDevice for FileDevice {
             .unwrap()
             .write_at(data, block as u64 * BLOCK_SIZE as u64)
             .unwrap();
-        self.file.lock().unwrap().flush();
+        let _= self.file.lock().unwrap().flush();
     }
 }

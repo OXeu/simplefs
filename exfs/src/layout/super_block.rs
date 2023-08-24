@@ -10,22 +10,34 @@ const MAGIC: usize = 0x0aca_baca_01a7_88cc;
 #[derive(Copy, Clone, Debug, Default)]
 pub struct SuperBlock {
     magic: usize,
+    pub inode_bitmap_blocks: usize,
     pub bitmap_blocks: usize,
-    pub data_block_last: usize,
-    pub inode_block_last: usize,
-    pub inode_block_first: usize,
+    pub inode_blocks: usize,
+    pub data_blocks: usize,
 }
 
 impl SuperBlock {
     pub fn new(blocks: usize) -> Self {
-        assert!(blocks > 2); // 设备至少有三个可分配的块
-        let bitmap_blocks = (blocks - 2) / (BLOCK_SIZE * 8 + 1) + 1;
+        assert!(blocks > 10); // 设备至少有 10 个可分配的块(随意指定的一个数量确保绝大部分 fs 都大于且足够划分空间)
+        // data:n bitmap:y=(n+BS*8-1)/(BS*8) inode:n * INODE_SIZE/BS inode_bitmap:
+        let data = blocks;
+        let bitmap_blocks = (data + BLOCK_SIZE * 8 - 1) / (BLOCK_SIZE * 8);
+        let inode = data * INODE_SIZE / BLOCK_SIZE;
+        let inode_bitmap = (inode + BLOCK_SIZE * 8 - 1) / (BLOCK_SIZE * 8);
+        let all_blocks = 1 + data + bitmap_blocks + inode_bitmap + inode;
+        let scale = blocks as f64 / all_blocks as f64;
+
+        let data = (blocks as f64 * scale) as usize;
+        let bitmap_blocks = (data + BLOCK_SIZE * 8 - 1) / (BLOCK_SIZE * 8);
+        let left = blocks - 1 - data - bitmap_blocks;
+        let inode_bitmap_blocks = (left + BLOCK_SIZE * 8) / (BLOCK_SIZE * 8 + 1);
+        let inode = left - inode_bitmap_blocks;
         Self {
             magic: MAGIC,
+            inode_bitmap_blocks,
             bitmap_blocks,
-            data_block_last: bitmap_blocks + 1,
-            inode_block_last: blocks - 1,
-            inode_block_first: blocks-1,
+            inode_blocks: inode,
+            data_blocks: data,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -36,7 +48,7 @@ impl SuperBlock {
     // id 最小值为 1,id为 0 时表示无效地址
     pub fn data_block(&self, id: usize) -> usize {
         // assert!(id > 0);
-        1 + self.bitmap_blocks + id
+        1 + self.inode_bitmap_blocks + self.bitmap_blocks + self.inode_blocks + id
     }
 
     /// 通过 inode 号计算实际物理块地址与偏移量
@@ -45,6 +57,7 @@ impl SuperBlock {
     pub fn inode_block(&self, id: usize) -> (usize, usize) {
         let block_cap = BLOCK_SIZE / INODE_SIZE;
         let blk_index = id / block_cap;
-        (self.inode_block_first - blk_index, (id % block_cap)*INODE_SIZE)
+        let inode_blk = self.inode_bitmap_blocks + self.bitmap_blocks + blk_index;
+        (inode_blk, (id % block_cap) * INODE_SIZE)
     }
 }

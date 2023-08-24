@@ -74,6 +74,20 @@ impl Inode {
             index_node: Default::default(),
         }
     }
+    pub fn nil() -> Self {
+        Self{
+            index_level: 0,
+            extra: [0u8;9],
+            mode: 0,
+            link_count: 0,
+            created: 0,
+            modified: 0,
+            size: 0,
+            uid: 0,
+            gid: 0,
+            index_node: Default::default(),
+        }
+    }
 }
 
 impl Inode {
@@ -183,7 +197,7 @@ impl IndexNode {
                         .lock()
                         .unwrap()
                         .free();
-                    device.free_block(blk_id, false);
+                    device.free_block(blk_id, false,true);
                 }
             } else {
                 device
@@ -199,7 +213,7 @@ impl IndexNode {
                             *v = IndexNode::default();
                         });
                     });
-                device.free_block(blk_id, false)
+                device.free_block(blk_id, false,true)
             }
         }
     }

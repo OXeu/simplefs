@@ -66,7 +66,7 @@ impl Filesystem for BlockCacheDevice {
     }
 
     fn forget(&mut self, _req: &Request, _ino: u64, _nlookup: u64) {
-        println!("Forget: {}", _ino)
+        // println!("Forget: {}", _ino)
     }
 
     fn getxattr(
@@ -77,7 +77,7 @@ impl Filesystem for BlockCacheDevice {
         _size: u32,
         reply: ReplyXattr,
     ) {
-        println!("GetXAttr: {}", _ino);
+        // println!("GetXAttr: {}", _ino);
         reply.size(0)
     }
 
@@ -127,7 +127,7 @@ impl Filesystem for BlockCacheDevice {
     }
 
     fn readlink(&mut self, _req: &Request, _ino: u64, reply: ReplyData) {
-        println!("ReadLink: {}", _ino)
+        // println!("ReadLink: {}", _ino)
     }
 
     fn mknod(
@@ -205,11 +205,11 @@ impl Filesystem for BlockCacheDevice {
         _newname: &OsStr,
         reply: ReplyEntry,
     ) {
-        println!("Link: {}", _ino)
+        // println!("Link: {}", _ino)
     }
 
     fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        println!("RmDir: {:?}", _name)
+        // println!("RmDir: {:?}", _name)
     }
 
     fn rename(
@@ -237,16 +237,16 @@ impl Filesystem for BlockCacheDevice {
         _link: &Path,
         reply: ReplyEntry,
     ) {
-        println!("SymLink: {:?}", _name)
+        // println!("SymLink: {:?}", _name)
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: u32, reply: ReplyEmpty) {
-        println!("Access: {}", _ino);
+        // println!("Access: {}", _ino);
         reply.ok()
     }
 
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
-        println!("OpenDir: {}", _ino);
+        // println!("OpenDir: {}", _ino);
         reply.opened(_ino, O_RDWR as u32);
     }
 
@@ -272,7 +272,7 @@ impl Filesystem for BlockCacheDevice {
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        println!("StatsFS: {}", _ino)
+        // println!("StatsFS: {}", _ino)
     }
 
     fn lookup(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEntry) {

@@ -30,7 +30,7 @@ impl BlockCacheDevice {
         let cache_blk = Arc::new(Mutex::new(CacheBlock::new(device.clone(), 0)));
         Self {
             device,
-            caches: LruCache::new(NonZeroUsize::new(1024).unwrap()),
+            caches: LruCache::new(NonZeroUsize::new(128).unwrap()),
             file_handlers: BTreeMap::new(),
             recycled_fh: Vec::new(),
             super_block: cache_blk,
@@ -74,7 +74,7 @@ impl BlockCacheDevice {
             Some(cache) => cache.clone(),
             None => {
                 let cache = Arc::new(Mutex::new(CacheBlock::new(self.device.clone(), block)));
-                self.caches.push(block, cache.clone());
+                let _ = self.caches.push(block, cache.clone());
                 cache
             }
         }
@@ -93,11 +93,7 @@ impl BlockCacheDevice {
     /// inode 块是倒序存储的,内部是顺序存储的
     /// @return block_id(物理),offset
     pub fn inode_block(&self, id: usize) -> (usize, usize) {
-        let mut super_block: SuperBlock = SuperBlock::default();
-        self.super_block
-            .lock()
-            .unwrap()
-            .read(0, |sb: &SuperBlock| super_block = *sb);
+        let mut super_block: SuperBlock = self.super_block();
         super_block.inode_block(id)
     }
 
@@ -220,7 +216,7 @@ impl BlockCacheDevice {
         } else if need_blk_num < index_blk.len() {
             // 缩容
             for _ in need_blk_num..index_blk.len() {
-                self.free_block(index_blk.pop().unwrap(), false);
+                self.free_block(index_blk.pop().unwrap(), false,true);
             }
         }
         let mut offset = 0;
@@ -289,7 +285,7 @@ impl BlockCacheDevice {
     }
 
     pub fn sync(&mut self) {
-        self.caches.iter().for_each(|c| c.1.lock().unwrap().sync())
+        self.caches.iter().for_each(|(_,c)| c.lock().unwrap().sync())
     }
 
     fn mk_root(&mut self) {
@@ -333,7 +329,9 @@ impl BlockCacheDevice {
                         });
                         // println!("dirs: {:?}", dirs);
                         let buf: Vec<u8> = vec2slice(dirs);
-                        self.write_inner(0, parent_inode, &buf);
+                        if let Err(e) =  self.write_inner(0, parent_inode, &buf) {
+                            return Err(e)
+                        }
                         // let (index_node, level) = self.write_data(buf.as_slice(), 0);
                         // // println!("free {}({})", 5, self.check(5));
                         // parent.index_node.delete(self, parent.index_level, false); // 删除原数据
@@ -388,7 +386,7 @@ impl BlockCacheDevice {
                             let ino_id = entry.inode as usize;
                             let inode = self.inode(ino_id);
                             inode.index_node.delete(self, inode.index_level, true);
-                            self.free_block(ino_id, true);
+                            self.free_block(ino_id, true,true);
                         }
                         let mut buf = vec2slice(v);
                         align(&mut buf, BLOCK_SIZE);

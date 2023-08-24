@@ -60,6 +60,7 @@ impl CacheBlock {
         offset: usize,
         f: impl FnOnce(&mut T) -> V,
     ) -> V {
+        self.dirty = true;
         let blk = self.block;
         let data: &mut T = self.get_mut(offset);
         let data_slice =
@@ -68,16 +69,14 @@ impl CacheBlock {
         if data_slice.len() < BLOCK_SIZE {
             println!("({}->{})【Before】{:?}", blk, offset, &data);
         } else if data_mm.len() > 0 {
-            // let d = unsafe { &mut *(data_mm.as_ptr() as *mut T) };
-            println!("({}->{})【Before】{:?}", blk, offset, data_mm);
+            println!("({}->{})【Before】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
         }
         let v = f(data);
         let data_mm = data_slice.trim();
         if data_slice.len() < BLOCK_SIZE {
             println!("({}->{})【After】{:?}", blk, offset, &data);
         } else if data_mm.len() > 0 {
-            // let d = unsafe { &mut *(data_mm.as_ptr() as *mut T) };
-            println!("({}->{})【After】{:?}", blk, offset, data_mm);
+            println!("({}->{})【After】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
         }
         self.sync(); // 关缓存
         v
@@ -88,7 +87,6 @@ impl CacheBlock {
                 *byte = 0;
             }
         });
-        self.device.write(self.block, &self.data)
     }
 
     pub fn sync(&mut self) {
