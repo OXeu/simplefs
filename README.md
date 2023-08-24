@@ -1,5 +1,5 @@
-<h1 align="center"> VAFS </h1>
-<p align="center"> Vast FileSystem </p>
+<h1 align="center"> SimpleFS </h1>
+<p align="center"> Simple Toy FileSystem </p>
 
 ## 特性
 
