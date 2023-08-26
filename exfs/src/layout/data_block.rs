@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
 use crate::config::BLOCK_SIZE;
+use crate::typ::file_name::FileName;
 
 pub type DataBlock = [u8; BLOCK_SIZE];
 
@@ -10,10 +11,15 @@ pub type DataBlock = [u8; BLOCK_SIZE];
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct DirEntry {
-    pub name: FileName, // 56 bytes
+    pub name: FileName,
+    // 56 bytes
     pub inode: u64,     // 8 bytes
 }
 
-pub type FileName = [u8; 56];
+impl DirEntry {
+    pub fn valid(&self) -> bool {
+        !self.name.is_empty() && self.inode != 0
+    }
+}
 
 pub const DIR_ENTRY_SIZE: usize = size_of::<DirEntry>();

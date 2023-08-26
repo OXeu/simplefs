@@ -1,4 +1,5 @@
-pub mod bitmap;
-pub mod inode;
-pub mod super_block;
-pub mod data_block;
+pub(crate) mod bitmap;
+pub(crate) mod inode;
+pub(crate) mod super_block;
+pub(crate) mod data_block;
+pub(crate) mod index_node;

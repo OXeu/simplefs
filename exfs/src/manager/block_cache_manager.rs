@@ -3,19 +3,20 @@ use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-use libc::{c_int, EBADF, EEXIST, ENOENT, ENOSPC, ENOTDIR};
-use log::debug;
+use libc::{c_int, EBADF, ENOSPC};
 use lru::LruCache;
 
 use crate::block_device::block_device::BlockDevice;
 use crate::cache::block_cache::CacheBlock;
 use crate::cache::file_handler::FileHandler;
 use crate::config::BLOCK_SIZE;
-use crate::layout::data_block::{DataBlock, DirEntry, FileName, DIR_ENTRY_SIZE};
-use crate::layout::inode::{IndexNode, Inode, DIR};
+use crate::layout::data_block::DataBlock;
+use crate::layout::index_node::IndexNode;
+use crate::layout::inode::{Inode, InodeWithId};
 use crate::layout::super_block::SuperBlock;
-use crate::manager::DirEntryDetail;
-use crate::utils::slice::{align, vec2slice};
+use crate::manager::error_code::ErrorCode;
+use crate::typ::file_type::FileType;
+use crate::utils::slice::vec2slice;
 
 /// 块设备缓存管理器
 pub struct BlockCacheDevice {
@@ -38,32 +39,39 @@ impl BlockCacheDevice {
         }
     }
 
-    pub fn fh(&self, fh: u64) -> Option<&FileHandler> {
-        self.file_handlers.get(&fh)
+    pub fn fh(&self, fh: u32, pid: u32) -> Option<&FileHandler> {
+        let key = (fh as u64) << 32 | pid as u64;
+        self.file_handlers.get(&key)
     }
 
-    pub fn open_inner(&mut self, inode: usize, offset: usize, flags: u16) -> u64 {
-        let key = if self.recycled_fh.is_empty() {
+    pub fn open_internal(
+        &mut self,
+        inode: usize,
+        offset: usize,
+        flags: i32,
+        pid: u32,
+    ) -> Result<u32, ErrorCode> {
+        let key = if self.recycled_fh.iter().filter(|&v| (*v >> 32) as u32 == pid).count() <= 0 {
             self.file_handlers.keys().max().unwrap_or(&0) + 1
         } else {
             self.recycled_fh.pop().unwrap()
         };
-        self.file_handlers.insert(
-            key,
-            FileHandler {
-                inode,
-                offset,
-                flags,
-            },
-        );
-        key
+        FileHandler::new(inode, self, offset, flags).map(|v| {
+            self.file_handlers.insert(key, v);
+            (key >> 32) as u32
+        })
     }
 
-    pub fn close_inner(&mut self, fh: u64) -> Result<(), c_int> {
-        match self.file_handlers.get(&fh) {
+    pub fn close_internal(&mut self, fh: u32, pid: u32, flush: bool) -> Result<(), c_int> {
+        let key = (fh as u64) << 32 | pid as u64;
+        match self.file_handlers.get(&key) {
             Some(_) => {
-                self.file_handlers.remove(&fh);
-                self.recycled_fh.push(fh);
+                self.file_handlers.remove(&key).map(|fh| {
+                    if flush {
+                        fh.flush(self);
+                    }
+                });
+                self.recycled_fh.push(key);
                 Ok(())
             }
             None => Err(EBADF),
@@ -109,7 +117,7 @@ impl BlockCacheDevice {
 
     pub fn inode(&mut self, id: usize) -> Inode {
         let (blk_id, offset) = self.inode_block(id);
-        let mut inode: Inode = Inode::new(0);
+        let mut inode: Inode = Inode::nil();
         self.block_cache(blk_id)
             .lock()
             .unwrap()
@@ -119,8 +127,8 @@ impl BlockCacheDevice {
         inode
     }
 
-    pub fn inode_data_blk_list(&mut self, id: usize) -> Vec<usize> {
-        let inode = self.inode(id);
+    /// inode 数据存储所在的物理块 id 列表
+    pub fn inode_data_blk_list(&mut self, inode: &Inode) -> Vec<usize> {
         inode.index_node.list(self, inode.index_level)
     }
 
@@ -135,40 +143,15 @@ impl BlockCacheDevice {
             .iter()
             .for_each(|v| {
                 // debug!("data blocks: {}", v);
-                self.block_cache(self.data_block(*v)).lock().unwrap().read(
-                    0,
-                    |data: &[u8;BLOCK_SIZE]| {
-                        data.iter()
-                            .for_each(|v| data_.push(*v))
-                    },
-                );
+                self.block_cache(self.data_block(*v))
+                    .lock()
+                    .unwrap()
+                    .read(0, |data: &[u8; BLOCK_SIZE]| {
+                        data.iter().for_each(|v| data_.push(*v))
+                    });
             });
         data_.truncate(inode.size as usize);
         data_
-    }
-
-    /// id: inode id
-    pub fn dir_list(&mut self, id: usize) -> Vec<DirEntry> {
-        let inode = self.inode(id);
-        let mut entries = Vec::new();
-        // debug!("dir list: {:?},{}", inode.index_node, inode.index_level);
-        inode
-            .index_node
-            .list(self, inode.index_level)
-            .iter()
-            .for_each(|v| {
-                // debug!("data blocks: {}", v);
-                self.block_cache(self.data_block(*v)).lock().unwrap().read(
-                    0,
-                    |dirs: &[DirEntry; BLOCK_SIZE / DIR_ENTRY_SIZE]| {
-                        // debug!("dir entries: {:?}", dirs);
-                        dirs.iter()
-                            .filter(|v| !v.name.is_empty() && v.inode != 0)
-                            .for_each(|dir| entries.push(*dir))
-                    },
-                );
-            });
-        entries
     }
 
     pub fn modify_inode<V>(&mut self, id: usize, f: impl FnOnce(&mut Inode) -> V) -> V {
@@ -206,7 +189,7 @@ impl BlockCacheDevice {
     ///  new_data_blocks: 现在的所有数据块，包含原有块，若不包含则表示删除数据块，将会缩减索引
     pub fn make_index_part(
         &mut self,
-        inode_id: usize,
+        inode: &InodeWithId,
         data_blocks: Vec<usize>,
         data_level: u8,
     ) -> Result<(), c_int> {
@@ -214,7 +197,7 @@ impl BlockCacheDevice {
         // debug!("Index node：{:?},data:{:?}", new_index, data_blocks);
         if new_index.len() <= 1 {
             // top level,save to inode
-            self.modify_inode(inode_id, |ino| {
+            self.modify_inode(inode.inode, |ino| {
                 if new_index.is_empty() {
                     ino.index_node = IndexNode::default();
                     ino.index_level = 0;
@@ -228,11 +211,11 @@ impl BlockCacheDevice {
         // 将索引转换为字节存储
         let buf: Vec<u8> = vec2slice(new_index);
         let need_blk_num = (buf.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        let inode = self.inode(inode_id);
-        let mut index_blk =
-            inode
-                .index_node
-                .list_level_blk(self, inode.index_level, data_level + 1);
+        let mut index_blk = inode.inode().index_node.list_level_blk(
+            self,
+            inode.inode().index_level,
+            data_level + 1,
+        );
         if need_blk_num > index_blk.len() {
             // 扩容
             for _ in index_blk.len()..need_blk_num {
@@ -257,7 +240,7 @@ impl BlockCacheDevice {
             });
             offset += BLOCK_SIZE
         }
-        self.make_index_part(inode_id, index_blk, data_level + 1)
+        self.make_index_part(inode, index_blk, data_level + 1)
     }
 
     pub fn make_indexes(&mut self, data_blocks: Vec<usize>, level: u8) -> (IndexNode, u8) {
@@ -319,183 +302,24 @@ impl BlockCacheDevice {
             .for_each(|(_, c)| c.lock().unwrap().sync());
         self.device.sync();
     }
+    pub fn flush_internal(&mut self, inode: &InodeWithId) {
+        let mut data_blocks = self.inode_data_blk_list(inode.inode());
+        let (inode_blk, _) = self.inode_block(inode.inode);
+        data_blocks.push(inode_blk);
+        self.caches
+            .iter()
+            .filter(|(id, _)| {
+                data_blocks.contains(*id)
+            })
+            .for_each(|(_, c)| c.lock().unwrap().sync());
+        self.device.sync();
+    }
 
     fn mk_root(&mut self) {
         let inode = self.alloc_block(true).unwrap();
         self.modify_inode(inode, |root| {
-            *root = Inode::new(DIR << 12 | 0b111101101);
+            *root = Inode::new((FileType::Dir as u16) << 12 | 0b111101101);
             root.size = BLOCK_SIZE as u64
-        })
-    }
-}
-
-/// 上层接口
-impl BlockCacheDevice {
-    pub fn mk_file(
-        &mut self,
-        file_name: &str,
-        parent_inode: usize,
-        mode: u16,
-    ) -> Result<usize, c_int> {
-        let mut name = [0u8; 56];
-        name[..file_name.len()].copy_from_slice(file_name.as_bytes());
-        // debug!("mk_file: {:?}, parent: {}", name, parent_inode);
-        let parent = self.inode(parent_inode);
-        debug!("parent Inode({}):{:?}", parent_inode, parent);
-        if parent.exist() {
-            return if parent.is_dir() {
-                let mut dirs = self.dir_list(parent_inode);
-                // debug!("dirs0: {:?}", dirs);
-                if dirs.iter().any(|v| v.name.as_slice() == name) {
-                    return Err(EEXIST);
-                }
-                let inode_opt = self.alloc_block(true);
-                match inode_opt {
-                    None => return Err(ENOSPC),
-                    Some(inode_id) => {
-                        // debug!("Allocated Inode: {}", inode_id);
-                        self.print();
-                        self.modify_inode(inode_id, |inode| *inode = Inode::new(mode));
-                        dirs.push(DirEntry {
-                            name,
-                            inode: inode_id as u64,
-                        });
-                        // debug!("dirs: {:?}", dirs);
-                        let buf: Vec<u8> = vec2slice(dirs);
-                        if let Err(e) = self.write_all(0, parent_inode, &buf, true) {
-                            debug!("mk_file:339 error: {}", e);
-                            return Err(e);
-                        }
-                        // let (index_node, level) = self.write_data(buf.as_slice(), 0);
-                        // // debug!("free {}({})", 5, self.check(5));
-                        // parent.index_node.delete(self, parent.index_level, false); // 删除原数据
-                        // self.modify_inode(parent_inode, |p| {
-                        //     p.index_node = index_node;
-                        //     p.index_level = level;
-                        //     p.size = buf.len() as u64;
-                        // });
-                        // let parent = self.inode(parent_inode);
-                        // debug!("parent ({}) -> {:?}", parent_inode, parent);
-                        return Ok(inode_id);
-                    }
-                }
-            } else {
-                Err(ENOTDIR)
-            };
-        }
-        debug!("mk_file:end error: NotExist");
-        Err(ENOENT)
-    }
-
-    pub fn ls_(&mut self, inode_id: usize) -> Result<Vec<DirEntry>, c_int> {
-        // debug!("ls_ {}",inode_id);
-        let inode = self.inode(inode_id);
-        if inode.exist() {
-            if inode.is_dir() {
-                Ok(self.dir_list(inode_id))
-            } else {
-                Err(ENOTDIR)
-            }
-        } else {
-            Err(ENOENT)
-        }
-    }
-
-    pub fn lookup_inter(&mut self, parent: usize, name: FileName) -> Result<DirEntry, c_int> {
-        match self.ls_(parent) {
-            Ok(v) => match v.iter().find(|entry| name == entry.name) {
-                None => Err(ENOENT),
-                Some(e) => Ok(e.clone()),
-            },
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn rm(&mut self, parent: usize, name: FileName) -> Result<(), c_int> {
-        match self.ls_(parent) {
-            Ok(mut v) => {
-                for (id, entry) in v.clone().iter().enumerate() {
-                    if entry.name == name {
-                        v.remove(id);
-                        let ino_id = entry.inode as usize;
-                        let inode = self.modify_inode(ino_id,|inode|{
-                            inode.link_count -= 1;
-                            inode.clone()
-                        });
-                        if inode.link_count == 0 {
-                            inode.index_node.delete(self, inode.index_level, true);
-                            self.free_block(ino_id, true, true);
-                        }
-                        let mut buf = vec2slice(v);
-                        align(&mut buf, BLOCK_SIZE);
-                        return match self.write_all(0, parent, &buf, true) {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(e),
-                        };
-                    }
-                }
-                Err(ENOENT)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn rename_inner(
-        &mut self,
-        parent: usize,
-        name: FileName,
-        new_parent: usize,
-        new_name: FileName,
-    ) -> Result<(), c_int> {
-        let old = self.lookup_inter(parent, name);
-        if parent == new_parent && name == new_name {
-            return Ok(());
-        }
-        match old {
-            Ok(entry) => match self.rm(new_parent, new_name) {
-                Ok(_) | Err(ENOENT) => {
-                    let mut new_dirs = self.dir_list(new_parent);
-                    new_dirs.push(DirEntry {
-                        name: new_name,
-                        inode: entry.inode,
-                    });
-                    let mut buf = vec2slice(new_dirs);
-                    align(&mut buf, BLOCK_SIZE);
-                    if let Err(e) = self.write_all(0, new_parent, &buf, true) {
-                        return Err(e);
-                    }
-                    match self.rm(parent, name) {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e),
-                    }
-                }
-                Err(e) => Err(e),
-            },
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn ls(&mut self, path: &str) -> Result<Vec<DirEntryDetail>, c_int> {
-        let path_split = path.split("/").filter(|p| !p.is_empty());
-        let mut parent_inode = 0;
-        for p in path_split {
-            match self
-                .dir_list(parent_inode)
-                .iter()
-                .find(|v| to_str(v.name) == p)
-            {
-                None => return Err(ENOENT),
-                Some(v) => parent_inode = v.inode as usize,
-            }
-        }
-        self.ls_(parent_inode).map(|vec| {
-            vec.iter()
-                .map(|v| DirEntryDetail {
-                    name: to_str(v.name),
-                    inode_id: v.inode as usize,
-                    inode: self.inode(v.inode as usize),
-                })
-                .collect()
         })
     }
 }
@@ -510,8 +334,4 @@ pub fn trim_zero(data: Vec<u8>) -> Vec<u8> {
         }
     }
     trimmed_data
-}
-
-pub fn to_str(name: FileName) -> String {
-    unsafe { String::from_utf8_unchecked(trim_zero(name.to_vec())) }
 }

@@ -4,6 +4,9 @@
 use crate::layout::inode::Inode;
 
 pub mod block_cache_manager;
+pub(crate) mod error_code;
+pub mod file_system;
+pub mod interface;
 
 pub struct DirEntryDetail {
     pub name: String,

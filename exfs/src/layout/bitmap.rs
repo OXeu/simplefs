@@ -1,16 +1,11 @@
 use std::ops::Range;
+
 use log::debug;
 
 use crate::config::BLOCK_SIZE;
 use crate::layout::inode::Inode;
 use crate::layout::super_block::SuperBlock;
 use crate::manager::block_cache_manager::BlockCacheDevice;
-
-#[derive(Eq, PartialEq)]
-pub enum AllocError {
-    NoEnoughSpace,
-    Nothing,
-}
 
 impl BlockCacheDevice {
     /// @return Option<usize> data_block_id
@@ -148,6 +143,8 @@ impl BlockCacheDevice {
         }
     }
 
+    /// 打印当前已经分配的块
+    /// 仅作调试使用
     pub fn print(&mut self) {
         let super_block = self.super_block();
         let size = super_block.inode_blocks;

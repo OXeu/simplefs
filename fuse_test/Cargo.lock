@@ -53,7 +53,7 @@ checksum = "aafcde04e90a5226a6443b7aabdb016ba2f8307c847d524724bd9b346dd1a2d3"
 dependencies = [
  "atty",
  "humantime",
-    "log",
+ "log",
  "regex",
  "termcolor",
 ]
@@ -62,10 +62,10 @@ dependencies = [
 name = "exfs"
 version = "0.1.0"
 dependencies = [
-    "fuser",
+ "fuser",
  "lazy_static",
  "libc",
-    "log",
+ "log",
  "lru",
  "time",
 ]
@@ -76,7 +76,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "exfs",
-    "fuser",
+ "fuser",
 ]
 
 [[package]]
@@ -85,11 +85,11 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74928cf021619b0612e45c3a5332e9a5302c6739b7b5eaecd835ba620c346e0d"
 dependencies = [
-    "libc",
-    "log",
-    "page_size",
-    "pkg-config",
-    "users",
+ "libc",
+ "log",
+ "page_size",
+ "pkg-config",
+ "users",
 ]
 
 [[package]]
@@ -165,8 +165,8 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eebde548fbbf1ea81a99b128872779c437752fb99f217c45245e1a61dcd9edcd"
 dependencies = [
-    "libc",
-    "winapi",
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -236,8 +236,8 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24cc0f6d6f267b73e5a2cadf007ba8f9bc39c6a6f9666f8cf25ea809a153b032"
 dependencies = [
-    "libc",
-    "log",
+ "libc",
+ "log",
 ]
 
 [[package]]

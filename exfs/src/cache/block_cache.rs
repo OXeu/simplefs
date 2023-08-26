@@ -81,7 +81,7 @@ impl CacheBlock {
         } else if data_mm.len() > 0 {
             debug!("({}->{})【After】{:?}", blk, offset, String::from_utf8_lossy(data_mm));
         }
-        self.sync(); // 关缓存
+        // self.sync(); // 关缓存
         v
     }
     pub fn free(&mut self) {

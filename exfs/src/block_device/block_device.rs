@@ -1,3 +1,4 @@
+
 pub trait BlockDevice {
     fn id(&self) -> usize;
     fn read(&self, block: usize, buf: &mut [u8]);
