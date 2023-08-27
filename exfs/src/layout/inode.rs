@@ -39,7 +39,7 @@ pub struct Inode {
 }
 
 impl Inode {
-    pub fn new(mode: u16) -> Self {
+    pub fn new(mode: u16, uid: u32, gid: u32) -> Self {
         let start = SystemTime::now();
         let since_the_epoch = start
             .duration_since(UNIX_EPOCH)
@@ -53,8 +53,8 @@ impl Inode {
             created: since_the_epoch,
             modified: since_the_epoch,
             size: 0,
-            uid: 0,
-            gid: 0,
+            uid,
+            gid,
             index_node: Default::default(),
         }
     }
@@ -79,10 +79,11 @@ impl Inode {
         self.file_type() != FileType::UNK
     }
     pub fn is_dir(&self) -> bool {
+        // println!("is_dir: {},{:?}", self.mode, self.file_type());
         self.file_type() == FileType::Dir
     }
     pub fn file_type(&self) -> FileType {
-        (self.mode >> 12).into()
+        FileType::from(self.mode)
     }
 }
 
@@ -112,7 +113,9 @@ impl InodeWithId {
         return (self.data.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
     }
     pub fn permission(&self) -> u16 {
-        self.data.mode & 0o777
+        let per = self.data.mode & 0o777;
+        println!("permisson: {:o}", per);
+        per
     }
     pub fn inode(&self) -> &Inode {
         &self.data

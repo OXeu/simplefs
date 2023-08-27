@@ -1,6 +1,7 @@
 use crate::layout::inode::Inode;
 use crate::manager::error_code::{EPERM, ErrorCode};
 
+#[derive(Debug)]
 pub struct Req {
     pub uid: u32,
     pub gid: u32,
@@ -60,6 +61,7 @@ impl Inode {
         if self.access(req.uid, req.gid, mask) {
             Ok(value)
         } else {
+            panic!("No permission: inode{:?} req:{:?} mask:{:?}",self,req,mask);
             Err(EPERM)
         }
     }
@@ -72,6 +74,7 @@ impl Inode {
         if self.access(req.uid, req.gid, mask) {
             value()
         } else {
+            panic!("No permission function: inode{:?} req:{:?} mask:{:?}",self,req,mask);
             Err(EPERM)
         }
     }

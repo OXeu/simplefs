@@ -1,41 +1,40 @@
-use fuser::{
-    FileAttr,
-    Request,
-};
+use std::ffi::{OsStr, OsString};
+use std::io::SeekFrom;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
+
+use fuser::{FileAttr, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, ReplyXattr, Request, TimeOrNow};
+use libc::ENOTSUP;
+use log::debug;
 
 use crate::config::BLOCK_SIZE;
 use crate::layout::inode::InodeWithId;
-use crate::manager::error_code::ErrorCode;
+use crate::manager::block_cache_manager::BlockCacheDevice;
+use crate::manager::error_code::EBADF;
 use crate::typ::file_type::FileType;
 use crate::typ::request::Req;
 use crate::utils::time::system_time_from_time;
 
-fn reply_<T>(data: Result<T, ErrorCode>, error: impl FnOnce(ErrorCode), f: impl FnOnce(T)) {
-    match data {
-        Ok(v) => f(v),
-        Err(e) => error(e),
-    }
-}
-/*
 impl Filesystem for BlockCacheDevice {
     fn lookup(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEntry) {
         let ttl = Duration::new(60, 0);
-        reply_(
-            self.lookup(&_req.into(), cast(_parent), _name.into()),
-            |e| reply.error(e),
-            |entry| reply.entry(&ttl, &entry, 0),
-        )
+        let guard = self.lookup_guard(&_req.into(), cast(_parent), _name.into());
+        println!("Lookup: {:?}", guard);
+        match guard {
+            Err(e) => reply.error(e),
+            Ok(entry) => reply.entry(&ttl, &entry.into(), 0),
+        }
     }
 
     fn getattr(&mut self, _req: &Request, _ino: u64, reply: ReplyAttr) {
         let ttl = Duration::new(60, 0);
-        reply_(
-            self.getattr(&_req.into(), cast(_ino)),
-            |e| reply.error(e),
-            |data| {
-                reply.attr(&ttl, &data);
-            },
-        )
+        let res = self.getattr_guard(&_req.into(), cast(_ino));
+        match res {
+            Err(e) => reply.error(e),
+            Ok(data) => {
+                reply.attr(&ttl, &data.into());
+            }
+        }
     }
 
     fn setattr(
@@ -57,32 +56,33 @@ impl Filesystem for BlockCacheDevice {
         reply: ReplyAttr,
     ) {
         let ttl = Duration::new(60, 0);
-        reply_(
-            self.setattr(
-                &_req.into(),
-                _ino as usize,
-                _mode,
-                _uid,
-                _gid,
-                _size,
-                _atime,
-                _mtime,
-                _crtime,
-                _fh,
-                _crtime,
-                _chgtime,
-                _bkuptime,
-                _flags,
-            ),
-            |e| reply.error(e),
-            |attr| reply.attr(&ttl, &attr),
-        );
+        match self.setattr_guard(
+            &_req.into(),
+            _ino as usize,
+            _mode,
+            _uid,
+            _gid,
+            _size,
+            _atime,
+            _mtime,
+            _crtime,
+            _fh,
+            _crtime,
+            _chgtime,
+            _bkuptime,
+            _flags, )
+        {
+            Err(e) => reply.error(e),
+            Ok(attr) => reply.attr(&ttl, &attr.into())
+        }
     }
 
     fn readlink(&mut self, _req: &Request, _ino: u64, reply: ReplyData) {
         // debug!("ReadLink: {}", _ino)
-        let buf = self.read_all(cast(_ino));
-        reply.data(buf.as_ref())
+        match self.readlink_guard(&_req.into(), _ino as usize) {
+            Err(e) => reply.error(e),
+            Ok(buf) => reply.data(buf.as_ref())
+        }
     }
 
     fn mknod(
@@ -95,19 +95,10 @@ impl Filesystem for BlockCacheDevice {
         _rdev: u32,
         reply: ReplyEntry,
     ) {
-        let file = self.make_node_internal(_name.to_str().unwrap(), cast(_parent), _mode as u16);
         let ttl = Duration::new(60, 0);
-        match file {
-            Ok(v) => {
-                let inode = self.inode(v);
-                let attr = inode.with_id(v).into();
-                debug!("Mknod: v:{}, {:#?}", v, attr);
-                reply.entry(&ttl, &attr, 0)
-            }
-            Err(e) => {
-                debug!("Mknod error: {:?}", e);
-                reply.error(e)
-            }
+        match self.mknod_guard(&_req.into(), _parent as usize, _name.into(), _mode, _umask, _rdev) {
+            Err(e) => reply.error(e),
+            Ok(buf) => reply.entry(&ttl, &buf.into(), 0)
         }
     }
 
@@ -120,31 +111,17 @@ impl Filesystem for BlockCacheDevice {
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        let folder = self.make_node_internal(
-            _name.to_str().unwrap(),
-            cast(_parent),
-            FileType::Dir << 12 | _mode as u16,
-        );
         let ttl = Duration::new(60, 0);
-        match folder {
-            Ok(v) => {
-                let inode = self.inode(v);
-                let attr = inode.with_id(v).into();
-                // debug!("Mkdir: v:{}, {:#?}", v, attr);
-                reply.entry(&ttl, &attr, 0)
-            }
-            Err(e) => {
-                debug!("Mkdir error: {:?}", e);
-                reply.error(e)
-            }
+        match self.mkdir_guard(&_req.into(), _parent as usize, _name.into(), _mode, _umask) {
+            Err(e) => reply.error(e),
+            Ok(buf) => reply.entry(&ttl, &buf.into(), 0)
         }
     }
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        let parent_id = cast(_parent);
-        match self.rm(parent_id, _name.into()) {
-            Ok(_) => reply.ok(),
+        match self.unlink_guard(&_req.into(), _parent as usize, _name.into()) {
             Err(e) => reply.error(e),
+            Ok(_) => reply.ok()
         }
     }
 
@@ -156,28 +133,10 @@ impl Filesystem for BlockCacheDevice {
         _link: &Path,
         reply: ReplyEntry,
     ) {
-        // debug!("SymLink: {:?}", _name)
-        let symbol = self.make_node_internal(
-            _name.to_str().unwrap(),
-            cast(_parent),
-            FileType::SymbolLink << 12 | 0o744u16,
-        );
         let ttl = Duration::new(60, 0);
-        match symbol {
-            Ok(v) => {
-                let buf = _link.to_str().unwrap();
-                let inode = self.inode(v);
-                if let Err(e) = self.write_all(0, v, buf.as_ref(), true) {
-                    reply.error(e);
-                } else {
-                    let attr = inode.with_id(v).into();
-                    reply.entry(&ttl, &attr, 0);
-                }
-            }
-            Err(e) => {
-                debug!("Symbol link error: {:?}", e);
-                reply.error(e)
-            }
+        match self.symlink_guard(&_req.into(), _parent as usize, _name.into(), _link) {
+            Err(e) => reply.error(e),
+            Ok(buf) => reply.entry(&ttl, &buf.into(), 0)
         }
     }
 
@@ -191,11 +150,9 @@ impl Filesystem for BlockCacheDevice {
         _flags: u32,
         reply: ReplyEmpty,
     ) {
-        let parent = cast(_parent);
-        let new_parent = cast(_newparent);
-        match self.rename_internal(parent, _name.into(), new_parent, _newname.into()) {
-            Ok(_) => reply.ok(),
+        match self.move_guard(&_req.into(), _parent as usize, _name.into(), _newparent as usize, _newname.into(), _flags) {
             Err(e) => reply.error(e),
+            Ok(_) => reply.ok()
         }
     }
 
@@ -207,36 +164,18 @@ impl Filesystem for BlockCacheDevice {
         _newname: &OsStr,
         reply: ReplyEntry,
     ) {
-        println!("FFFFFFFFFF");
-        let inode_id = cast(_ino);
-        let parent_id = cast(_newparent);
-        let mut dirs = self.dir_list(parent_id);
-        match self.lookup_internal(parent_id, _newname.into()) {
-            Err(ENOENT) => {
-                dirs.push(DirEntry {
-                    name: _newname.into(),
-                    inode: inode_id as u64,
-                });
-                let buf: Vec<u8> = vec2slice(dirs);
-                if let Err(e) = self.write_all(0, parent_id, &buf, true) {
-                    debug!("link:235 error: {}", e);
-                    reply.error(e);
-                    return;
-                }
-                let inode = self.inode(inode_id);
-                let ttl = Duration::new(60, 0);
-                reply.entry(&ttl, &inode.with_id(_ino as usize).into(), 0)
-            }
-            Ok(_) => reply.error(EEXIST),
-            Err(e) => {
-                reply.error(e);
-            }
+        let ttl = Duration::new(60, 0);
+        match self.link_guard(&_req.into(), _ino as usize, _newparent as usize, _newname.into()) {
+            Err(e) => reply.error(e),
+            Ok(buf) => reply.entry(&ttl, &buf.into(), 0)
         }
     }
 
     fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        let fh = self.open_inner(cast(_ino), 0, _flags as u16);
-        reply.opened(fh, _flags as u32)
+        match self.open_guard(&_req.into(), _ino as usize, _flags) {
+            Err(e) => reply.error(e),
+            Ok(fh) => reply.opened(fh as u64, _flags as u32)
+        }
     }
 
     fn read(
@@ -254,14 +193,11 @@ impl Filesystem for BlockCacheDevice {
         for _ in 0.._size {
             buf.push(0)
         }
-        FileHandler {
-            inode: cast(_ino),
-            offset: _offset as usize,
-            flags: 0,
+
+        match self.read_guard(&_req.into(), _fh as u32, SeekFrom::Start(_offset as u64), &mut buf) {
+            Err(e) => reply.error(e),
+            Ok(_) => reply.data(&buf)
         }
-        .read(self, &mut buf);
-        debug!("Read {}: 【{:?}】", _ino, trim_zero(buf.clone()));
-        reply.data(&buf)
     }
 
     fn write(
@@ -276,15 +212,17 @@ impl Filesystem for BlockCacheDevice {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        match self.write_inner(_offset as usize, cast(_ino), _data) {
-            Ok(_) => reply.written(_data.len() as u32),
+        match self.write_guard(&_req.into(), _fh as u32, SeekFrom::Start(_offset as u64), _data) {
             Err(e) => reply.error(e),
+            Ok(len) => reply.written(len as u32)
         }
     }
 
     fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
-        self.sync();
-        reply.ok()
+        match self.flush_guard(&_req.into(), _fh as u32) {
+            Err(e) => reply.error(e),
+            Ok(_) => reply.ok()
+        }
     }
 
     fn release(
@@ -297,15 +235,24 @@ impl Filesystem for BlockCacheDevice {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        match self.close_inner(_fh) {
-            Ok(_) => reply.ok(),
+        match self.release_guard(&_req.into(), _fh as u32, _flush) {
             Err(e) => reply.error(e),
+            Ok(_) => reply.ok()
         }
     }
 
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        // debug!("OpenDir: {}", _ino);
-        reply.opened(_ino, O_RDWR as u32);
+        println!("Open {}", _ino);
+        match self.opendir_guard(&_req.into(), _ino as usize, _flags) {
+            Err(e) => {
+                println!("open dir error -> {}", e);
+                reply.error(e)
+            }
+            Ok(fh) => {
+                println!("open dir -> {}", fh);
+                reply.opened(fh as u64, _flags as u32)
+            }
+        }
     }
 
     fn readdir(
@@ -314,37 +261,18 @@ impl Filesystem for BlockCacheDevice {
         _ino: u64,
         _fh: u64,
         _offset: i64,
-        reply: ReplyDirectory,
+        mut reply: ReplyDirectory,
     ) {
-        let mut r = reply;
-        if _offset != 0 {
-            r.ok();
-            return;
-        }
-        match self.ls_(cast(_ino)) {
-            Ok(v) => {
-                let _ = r.add(
-                    _ino,
-                    1,
-                    fuser::FileType::Directory,
-                    OsString::from_str("..").unwrap(),
-                );
-                for entry in v {
-                    debug!("DirEntry: {:?} ({})", entry.name, entry.inode);
-                    let inode = self.inode(entry.inode as usize);
-                    let _ = r.add(
-                        entry.inode,
-                        1,
-                        inode.file_type().into(),
-                        OsString::from(entry.name).as_os_str(),
-                    );
-                }
-            }
-            Err(e) => {
-                debug!("ReadDir error: {:?}", e)
+        match self.readdir_guard(&_req.into(), _fh as u32, _offset as usize) {
+            Err(e) => reply.error(e),
+            Ok(buf) => {
+                buf.iter()
+                    .for_each(|dir| {
+                        let _ = reply.add(dir.inode_id as u64, dir.offset as i64, dir.inode.file_type().into(), OsString::from(dir.name.clone()));
+                    });
+                reply.ok()
             }
         }
-        r.ok()
     }
 
     fn getxattr(
@@ -355,13 +283,17 @@ impl Filesystem for BlockCacheDevice {
         _size: u32,
         reply: ReplyXattr,
     ) {
-        // debug!("GetXAttr: {}", _ino);
-        reply.error(ENOTSUP);
+        match self.getxattr_guard(&_req.into(), _ino as usize, _name.into(), _size) {
+            Err(e) => reply.error(e),
+            Ok(_) => reply.error(ENOTSUP)
+        }
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
-        // debug!("Access: {}", _ino);
-        reply.ok()
+        match self.access_guard(&_req.into(), _ino as usize, _mask) {
+            Err(e) => reply.error(e),
+            Ok(_) => reply.ok()
+        }
     }
 
     fn create(
@@ -374,28 +306,23 @@ impl Filesystem for BlockCacheDevice {
         _flags: i32,
         reply: ReplyCreate,
     ) {
-        let file = self.make_node_internal(
-            _name.to_str().unwrap(),
-            cast(_parent),
-            FileType::File << 12 | _mode as u16,
-        );
+        let req = _req.into();
         let ttl = Duration::new(60, 0);
-        match file {
-            Ok(v) => {
-                let inode = self.inode(v);
-                let attr = inode.with_id(v).into();
-                let fh = self.open_inner(v, 0, _flags as u16);
-                // debug!("Create: v:{}, {:#?}", v, attr);
-                reply.created(&ttl, &attr, 0, fh, _flags as u32);
-            }
-            Err(e) => {
-                debug!("Create error: {:?}", e);
-                reply.error(e)
+        match self.create_guard(&req, _parent as usize, _name.into(), _mode, _umask, _flags) {
+            Err(e) => reply.error(e),
+            Ok(fh) => {
+                match self.fh(fh, req.pid) {
+                    None => reply.error(EBADF),
+                    Some(handler) => {
+                        let inode = handler.inode_with_id();
+                        reply.created(&ttl, &inode.into(), 0, fh as u64, _flags as u32)
+                    }
+                }
             }
         }
     }
 }
-*/
+
 impl Into<fuser::FileType> for FileType {
     fn into(self) -> fuser::FileType {
         match self {
@@ -413,7 +340,7 @@ impl Into<fuser::FileType> for FileType {
 
 impl Into<FileAttr> for InodeWithId {
     fn into(self) -> FileAttr {
-        FileAttr {
+        let attr = FileAttr {
             ino: self.inode as u64,
             size: self.data.size,
             blocks: self.blocks(),
@@ -430,7 +357,9 @@ impl Into<FileAttr> for InodeWithId {
             blksize: (self.blocks() as usize * BLOCK_SIZE) as u32,
             padding: 0,
             flags: 0,
-        }
+        };
+        debug!("Attr:{:?}",attr);
+        attr
     }
 }
 
@@ -439,7 +368,7 @@ impl<'a> Into<Req> for &Request<'a> {
         Req {
             uid: self.uid(),
             gid: self.gid(),
-            pid: self.pid(),
+            pid: 0,
         }
     }
 }

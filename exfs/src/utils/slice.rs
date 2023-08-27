@@ -8,16 +8,6 @@ pub fn vec2slice<T: Sized>(data: Vec<T>) -> Vec<u8> {
         .collect()
 }
 
-pub fn slice2vec<T: Sized>(data: &[u8]) -> Vec<&T> {
-    let mut vec = Vec::new();
-    data.windows(size_of::<T>())
-        .for_each(|v| {
-            let addr = v[0] as *const &u8 as usize;
-            vec.push(unsafe { &*(addr as *const T) })
-        });
-    vec
-}
-
 pub fn slice<T: Sized>(data: &T) -> &'static [u8] {
     unsafe { std::slice::from_raw_parts(data as *const T as *const u8, size_of::<T>()) }
 }

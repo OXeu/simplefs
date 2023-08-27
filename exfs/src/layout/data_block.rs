@@ -18,6 +18,7 @@ pub struct DirEntry {
 
 impl DirEntry {
     pub fn valid(&self) -> bool {
+        // println!("Entry valid:{:?}", self);
         !self.name.is_empty() && self.inode != 0
     }
 }

@@ -86,6 +86,16 @@ impl FileHandler {
         device.read_internal(self, buf)
     }
 
+    pub fn read_block<T, V>(&mut self, device: &mut BlockCacheDevice, blk_id: usize, offset: usize, f: impl FnOnce(&T) -> V) -> Option<V> {
+        let data = device.inode_data_blk_list(&self.inode_with_id().data);
+        println!("read block {}, but {:?}", blk_id, data);
+        if blk_id >= data.len() { return None }
+        Some(device.block_cache(device.data_block(data[blk_id]))
+            .lock()
+            .unwrap()
+            .read(offset, f))
+    }
+
     fn is_append(&self) -> bool {
         (self.flags & O_APPEND) > 0
     }
@@ -136,7 +146,7 @@ impl BlockCacheDevice {
         let write_times = (offset_part + len + BLOCK_SIZE - 1) / BLOCK_SIZE;
         for i in 0..write_times {
             let offset = offset_mut % BLOCK_SIZE;
-            let end = BLOCK_SIZE.min(len - i * BLOCK_SIZE - offset);
+            let end = BLOCK_SIZE.min(len - i * BLOCK_SIZE + offset);
             // debug!("Verbose: {}..{},{},{},{}", offset, end, len, i * BLOCK_SIZE, len.min((i + 1) * BLOCK_SIZE));
             // 需要写几块
             let length = end - offset;

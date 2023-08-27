@@ -6,7 +6,7 @@ use fuser::TimeOrNow;
 use libc::ENOTSUP;
 
 use crate::config::BLOCK_SIZE;
-use crate::layout::data_block::DirEntry;
+use crate::layout::data_block::{DIR_ENTRY_SIZE, DirEntry};
 use crate::layout::inode::InodeWithId;
 use crate::manager::block_cache_manager::BlockCacheDevice;
 use crate::manager::DirEntryDetail;
@@ -14,12 +14,12 @@ use crate::manager::error_code::{EBADF, EEXIST, EIO, ENOENT, ENOTDIR, EPERM, Err
 use crate::typ::file_name::FileName;
 use crate::typ::file_type::FileType;
 use crate::typ::request::{Mask, Req};
-use crate::utils::slice::{slice2vec, vec2slice};
+use crate::utils::slice::vec2slice;
 use crate::utils::time::{time_sec, time_sys};
 
 /// 上层接口，实现了权限管理
 impl BlockCacheDevice {
-    pub fn lookup(
+    pub fn lookup_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -35,12 +35,12 @@ impl BlockCacheDevice {
         })
     }
 
-    pub fn getattr(&mut self, req: &Req, inode_id: usize) -> Result<InodeWithId, ErrorCode> {
+    pub fn getattr_guard(&mut self, req: &Req, inode_id: usize) -> Result<InodeWithId, ErrorCode> {
         let inode = self.inode(inode_id);
         inode.access_guard(req, Mask::R, inode.with_id(inode_id))
     }
 
-    pub fn setattr(
+    pub fn setattr_guard(
         &mut self,
         req: &Req,
         inode_id: usize,
@@ -84,13 +84,12 @@ impl BlockCacheDevice {
         })
     }
 
-    fn readlink(&mut self, req: &Req, inode_id: usize) -> Result<Vec<u8>, ErrorCode> {
-        // debug!("ReadLink: {}", _ino)
+    pub fn readlink_guard(&mut self, req: &Req, inode_id: usize) -> Result<Vec<u8>, ErrorCode> {
         let inode = self.inode(inode_id);
         inode.access_guard(req, Mask::R, self.read_all(inode_id))
     }
 
-    fn mknod(
+    pub fn mknod_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -105,12 +104,14 @@ impl BlockCacheDevice {
                 String::from(_name).as_str(),
                 &parent.with_id(_parent),
                 _mode as u16,
+                req.uid,
+                req.gid,
             )
                 .map(|v| self.inode(v).with_id(v))
         })
     }
 
-    fn mkdir(
+    pub fn mkdir_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -124,19 +125,21 @@ impl BlockCacheDevice {
                 String::from(_name).as_str(),
                 &parent.with_id(_parent),
                 FileType::Dir << 12 | _mode as u16,
+                req.uid,
+                req.gid,
             )
                 .map(|v| self.inode(v).with_id(v))
         })
     }
 
-    fn unlink(&mut self, req: &Req, _parent: usize, _name: FileName) -> Result<(), ErrorCode> {
+    pub fn unlink_guard(&mut self, req: &Req, _parent: usize, _name: FileName) -> Result<(), ErrorCode> {
         let parent = self.inode(_parent);
         parent.access_guard_f(req, Mask::WX, || {
             self.unlink_internal(&parent.with_id(_parent), _name.into())
         })
     }
 
-    fn symlink(
+    pub fn symlink_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -150,6 +153,8 @@ impl BlockCacheDevice {
                 String::from(_name).as_str(),
                 &parent.with_id(_parent),
                 FileType::SymbolLink << 12 | 0o744u16,
+                req.uid,
+                req.gid,
             )
                 .and_then(|v| {
                     let buf = _link.to_str().unwrap();
@@ -160,7 +165,7 @@ impl BlockCacheDevice {
         })
     }
 
-    fn mv(
+    pub fn move_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -183,7 +188,7 @@ impl BlockCacheDevice {
         })
     }
 
-    fn link(
+    pub fn link_guard(
         &mut self,
         req: &Req,
         _ino: usize,
@@ -199,9 +204,13 @@ impl BlockCacheDevice {
                             name: _new_name.into(),
                             inode: _ino as u64,
                         });
+                        let inode = self.modify_inode(_ino, |ino| {
+                            ino.link_count += 1;
+                            ino.clone()
+                        }).with_id(_ino);
                         let buf: Vec<u8> = vec2slice(dirs);
                         self.write_system(0, &new_parent.with_id(_new_parent), &buf, true)
-                            .map(|_| self.inode(_ino).with_id(_ino))
+                            .map(|_| inode)
                     }
                     Ok(_) => Err(EEXIST),
                     Err(e) => Err(e),
@@ -210,7 +219,7 @@ impl BlockCacheDevice {
         })
     }
 
-    fn open(&mut self, req: &Req, _ino: usize, _flags: i32) -> Result<u32, ErrorCode> {
+    pub fn open_guard(&mut self, req: &Req, _ino: usize, _flags: i32) -> Result<u32, ErrorCode> {
         let inode = self.inode(_ino);
         Mask::from_flag(_flags).map_or(Err(EIO), |mask| {
             inode.access_guard_f(req, mask, || {
@@ -219,7 +228,7 @@ impl BlockCacheDevice {
         })
     }
 
-    fn read(
+    pub fn read_guard(
         &mut self,
         req: &Req,
         fh: u32,
@@ -237,7 +246,7 @@ impl BlockCacheDevice {
         }
     }
 
-    fn write(
+    pub fn write_guard(
         &mut self,
         req: &Req,
         fh: u32,
@@ -255,7 +264,7 @@ impl BlockCacheDevice {
         }
     }
 
-    fn flush(&mut self, req: &Req, fh: u32) -> Result<(), ErrorCode> {
+    pub fn flush_guard(&mut self, req: &Req, fh: u32) -> Result<(), ErrorCode> {
         match self.fh(fh, req.pid) {
             None => Err(EBADF),
             Some(fh) => {
@@ -266,7 +275,7 @@ impl BlockCacheDevice {
         }
     }
 
-    fn release(
+    pub fn release_guard(
         &mut self,
         req: &Req,
         fh: u32,
@@ -275,45 +284,54 @@ impl BlockCacheDevice {
         self.close_internal(fh, req.pid, flush)
     }
 
-    fn opendir(&mut self, req: &Req, _ino: usize, _flags: i32) -> Result<u32, ErrorCode> {
-        // debug!("OpenDir: {}", _ino);
+    pub fn opendir_guard(&mut self, req: &Req, _ino: usize, _flags: i32) -> Result<u32, ErrorCode> {
         let inode = self.inode(_ino);
         if inode.is_dir() {
-            self.open(req, _ino, _flags)
+            self.open_guard(req, _ino, _flags)
         } else {
             Err(ENOTDIR)
         }
     }
 
-    fn readdir(&mut self, req: &Req, fh: u32, offset: usize) -> Result<Vec<DirEntryDetail>, ErrorCode> {
+    pub fn readdir_guard(&mut self, req: &Req, fh: u32, offset: usize) -> Result<Vec<DirEntryDetail>, ErrorCode> {
+        let blk_id = offset / (BLOCK_SIZE / DIR_ENTRY_SIZE);
+        let blk_offset = offset % (BLOCK_SIZE / DIR_ENTRY_SIZE);
+        println!("offset: {}", offset);
+        let mut offset_id = offset + 1;
         match self.fh(fh, req.pid) {
             None => Err(EBADF),
             Some(fh) => {
+                // println!("!!!1");
                 let mut fh = fh.clone();
-                let mut buf = [0u8; BLOCK_SIZE];
-                fh.seek(SeekFrom::Start(offset as u64));
-                fh.read(self, &mut buf);
-                let dirs: Vec<&DirEntry> = slice2vec(&buf);
-                Ok(dirs.iter().filter_map(|&dir| {
-                    if dir.valid() {
-                        let inode = self.inode(dir.inode as usize);
-                        Some(DirEntryDetail {
-                            name: String::from(dir.name),
-                            inode_id: dir.inode as usize,
-                            inode,
-                        })
-                    } else {
-                        None
+                // println!("!!!2");
+                let mut vec = Vec::new();
+                fh.read_block(self, blk_id, 0, |dirs: &[DirEntry; BLOCK_SIZE / DIR_ENTRY_SIZE]| {
+                    dirs.iter().skip(blk_offset).for_each(|dir| {
+                        if dir.valid() {
+                            vec.push(dir.clone())
+                        }
+                    })
+                });
+                // println!("dir_entry: {:?}",vec);
+                Ok(vec.iter().map(|dir| {
+                    let inode = self.inode(dir.inode as usize);
+                    let id = offset_id;
+                    offset_id += 1;
+                    DirEntryDetail {
+                        name: String::from(dir.name),
+                        inode_id: dir.inode as usize,
+                        offset: id,
+                        inode,
                     }
                 }).collect())
             }
         }
     }
 
-    fn getxattr(
+    pub fn getxattr_guard(
         &mut self,
         _req: &Req,
-        _ino: u64,
+        _ino: usize,
         _name: FileName,
         _size: u32,
     ) -> Result<(), ErrorCode> {
@@ -321,13 +339,13 @@ impl BlockCacheDevice {
         Err(ENOTSUP)
     }
 
-    fn access(&mut self, req: &Req, _ino: usize, _mask: i32) -> Result<(), ErrorCode> {
+    pub fn access_guard(&mut self, req: &Req, _ino: usize, _mask: i32) -> Result<(), ErrorCode> {
         // debug!("Access: {}", _ino);
         let inode = self.inode(_ino);
         inode.access_guard(req, Mask::from_mask(_mask), ())
     }
 
-    fn create(
+    pub fn create_guard(
         &mut self,
         req: &Req,
         _parent: usize,
@@ -336,13 +354,16 @@ impl BlockCacheDevice {
         _umask: u32,
         flags: i32,
     ) -> Result<u32, ErrorCode> {
+        println!("Create guard: parent:{} mode:{} umask:{} flags:{}", _parent, mode, _umask, flags);
         let parent = self.inode(_parent);
         self.make_node_internal(
             String::from(name).as_str(),
             &parent.with_id(_parent),
             FileType::File << 12 | mode as u16,
+            req.uid,
+            req.gid,
         ).and_then(|v| {
-            self.open(req, v, flags)
+            self.open_guard(req, v, flags)
         })
     }
 }

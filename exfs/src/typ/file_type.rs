@@ -29,7 +29,7 @@ impl Shl<u16> for FileType {
 
 impl From<u16> for FileType {
     fn from(value: u16) -> Self {
-        match value {
+        match value >> 12 {
             0b1100 => FileType::Socket,
             0b1010 => FileType::SymbolLink,
             0b1000 => FileType::File,

@@ -40,8 +40,11 @@ impl BlockCacheDevice {
     }
 
     pub fn fh(&self, fh: u32, pid: u32) -> Option<&FileHandler> {
-        let key = (fh as u64) << 32 | pid as u64;
-        self.file_handlers.get(&key)
+        let key = (pid as u64) << 32 | fh as u64;
+        println!("fh: {:x},pid:{:x},key:{:x},kv:{:x?}", fh, pid, key, self.file_handlers.keys());
+        let fh = self.file_handlers.get(&key);
+        if fh.is_none() { panic!("get fh bad descriptor") }
+        fh
     }
 
     pub fn open_internal(
@@ -52,18 +55,19 @@ impl BlockCacheDevice {
         pid: u32,
     ) -> Result<u32, ErrorCode> {
         let key = if self.recycled_fh.iter().filter(|&v| (*v >> 32) as u32 == pid).count() <= 0 {
-            self.file_handlers.keys().max().unwrap_or(&0) + 1
+            self.file_handlers.keys().filter(|&v| (*v >> 32) as u32 == pid).max().unwrap_or(&((pid as u64) << 32)) + 1
         } else {
             self.recycled_fh.pop().unwrap()
         };
         FileHandler::new(inode, self, offset, flags).map(|v| {
+            println!("open pid:{:x},key:{:x}", pid, key);
             self.file_handlers.insert(key, v);
-            (key >> 32) as u32
+            key as u32
         })
     }
 
     pub fn close_internal(&mut self, fh: u32, pid: u32, flush: bool) -> Result<(), c_int> {
-        let key = (fh as u64) << 32 | pid as u64;
+        let key = (pid as u64) << 32 | fh as u64;
         match self.file_handlers.get(&key) {
             Some(_) => {
                 self.file_handlers.remove(&key).map(|fh| {
@@ -102,7 +106,9 @@ impl BlockCacheDevice {
     /// inode 块是倒序存储的,内部是顺序存储的
     /// @return block_id(物理),offset
     pub fn inode_block(&self, id: usize) -> (usize, usize) {
-        self.super_block().inode_block(id)
+        let (blk_id, offset) = self.super_block().inode_block(id);
+        println!("[Inode Block] {} -> {}({})", id, blk_id, offset);
+        (blk_id, offset)
     }
 
     pub fn data<T>(&mut self, id: usize, offset: usize, f: impl FnOnce(&T)) {
@@ -127,7 +133,8 @@ impl BlockCacheDevice {
         inode
     }
 
-    /// inode 数据存储所在的物理块 id 列表
+    /// inode 数据存储所在的 数据块 id 列表
+    /// 非物理块
     pub fn inode_data_blk_list(&mut self, inode: &Inode) -> Vec<usize> {
         inode.index_node.list(self, inode.index_level)
     }
@@ -304,6 +311,9 @@ impl BlockCacheDevice {
     }
     pub fn flush_internal(&mut self, inode: &InodeWithId) {
         let mut data_blocks = self.inode_data_blk_list(inode.inode());
+        data_blocks = data_blocks.iter().map(|data_id| {
+            self.data_block(*data_id)
+        }).collect();
         let (inode_blk, _) = self.inode_block(inode.inode);
         data_blocks.push(inode_blk);
         self.caches
@@ -318,7 +328,7 @@ impl BlockCacheDevice {
     fn mk_root(&mut self) {
         let inode = self.alloc_block(true).unwrap();
         self.modify_inode(inode, |root| {
-            *root = Inode::new((FileType::Dir as u16) << 12 | 0b111101101);
+            *root = Inode::new((FileType::Dir as u16) << 12 | 0b111101101, 0, 0);
             root.size = BLOCK_SIZE as u64
         })
     }

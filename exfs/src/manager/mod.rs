@@ -11,5 +11,6 @@ pub mod interface;
 pub struct DirEntryDetail {
     pub name: String,
     pub inode_id: usize,
+    pub offset: usize,
     pub inode: Inode,
 }

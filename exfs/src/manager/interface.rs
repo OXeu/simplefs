@@ -26,8 +26,7 @@ impl BlockCacheDevice {
     pub fn make_node_internal(
         &mut self,
         file_name: &str,
-        parent: &InodeWithId,
-        mode: u16,
+        parent: &InodeWithId, mode: u16, uid: u32, gid: u32,
     ) -> Result<usize, ErrorCode> {
         let mut name = [0u8; 56];
         name[..file_name.len()].copy_from_slice(file_name.as_bytes());
@@ -42,7 +41,7 @@ impl BlockCacheDevice {
                         None => Err(ENOSPC),
                         Some(inode_id) => {
                             self.print();
-                            self.modify_inode(inode_id, |inode| *inode = Inode::new(mode));
+                            self.modify_inode(inode_id, |inode| *inode = Inode::new(mode, uid, gid));
                             dirs.push(DirEntry {
                                 name: name.into(),
                                 inode: inode_id as u64,
@@ -136,6 +135,9 @@ impl BlockCacheDevice {
                             name: new_name,
                             inode: entry.inode as u64,
                         });
+                        self.modify_inode(entry.inode,|ino|{
+                            ino.link_count += 1
+                        });
                         let mut buf = vec2slice(new_dirs);
                         align(&mut buf, BLOCK_SIZE);
                         self.write_system(0, new_parent, &buf, true)
@@ -169,6 +171,7 @@ impl BlockCacheDevice {
                 .map(|v| DirEntryDetail {
                     name: String::from(v.name),
                     inode_id: v.inode as usize,
+                    offset: 0,
                     inode: self.inode(v.inode as usize),
                 })
                 .collect()
