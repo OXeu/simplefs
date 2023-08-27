@@ -139,6 +139,17 @@ impl BlockCacheDevice {
         })
     }
 
+    pub fn rmdir_guard(&mut self, req: &Req, _parent: usize, _name: FileName) -> Result<(), ErrorCode> {
+        let parent = self.inode(_parent).with_id(_parent);
+        self.lookup_guard(req, _parent, _name)
+            .and_then(|v| {
+                self.remove_dir_internal(&v).and_then(|_| {
+                    // 删除自己
+                    self.unlink_internal(&parent, _name)
+                })
+            })
+    }
+
     pub fn symlink_guard(
         &mut self,
         req: &Req,

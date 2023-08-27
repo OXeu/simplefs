@@ -3,7 +3,7 @@ use std::ops::Range;
 use log::debug;
 
 use crate::config::BLOCK_SIZE;
-use crate::layout::inode::Inode;
+use crate::layout::inode::{Inode, INODE_SIZE};
 use crate::layout::super_block::SuperBlock;
 use crate::manager::block_cache_manager::BlockCacheDevice;
 
@@ -12,7 +12,7 @@ impl BlockCacheDevice {
     /// 返回逻辑地址
     pub fn alloc_block(&mut self, is_inode: bool) -> Option<usize> {
         let super_block = self.super_block();
-        let size = if is_inode { super_block.inode_blocks } else { super_block.data_blocks };
+        let size = if is_inode { super_block.inode_size() } else { super_block.data_blocks };
         for index in 0..size {
             if !self.used(index, is_inode) {
                 self.set(index, is_inode, true);
@@ -82,7 +82,7 @@ impl BlockCacheDevice {
         let range = self.bitmap_range(is_inode);
         let super_block = self.super_block();
         if is_inode {
-            if index > super_block.inode_blocks {
+            if index > super_block.inode_size() {
                 panic!("out of inode blocks bit range");
             }
         } else {
@@ -147,7 +147,9 @@ impl BlockCacheDevice {
     /// 仅作调试使用
     pub fn print(&mut self) {
         let super_block = self.super_block();
-        let size = super_block.inode_blocks;
+        println!("Super Blocks: {:?}", super_block);
+        println!("Inode Size: {}",INODE_SIZE);
+        let size = super_block.inode_size();
         let mut used = Vec::new();
         for id in 0..size {
             if self.used(id, true) {

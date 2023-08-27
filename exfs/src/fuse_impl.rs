@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 
 use fuser::{FileAttr, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, ReplyXattr, Request, TimeOrNow};
 use libc::ENOTSUP;
-use log::debug;
 
 use crate::config::BLOCK_SIZE;
 use crate::layout::inode::InodeWithId;
@@ -25,7 +24,6 @@ impl Filesystem for BlockCacheDevice {
             Ok(entry) => reply.entry(&ttl, &entry.into(), 0),
         }
     }
-
     fn getattr(&mut self, _req: &Request, _ino: u64, reply: ReplyAttr) {
         let ttl = Duration::new(60, 0);
         let res = self.getattr_guard(&_req.into(), cast(_ino));
@@ -36,7 +34,6 @@ impl Filesystem for BlockCacheDevice {
             }
         }
     }
-
     fn setattr(
         &mut self,
         _req: &Request,
@@ -76,7 +73,6 @@ impl Filesystem for BlockCacheDevice {
             Ok(attr) => reply.attr(&ttl, &attr.into())
         }
     }
-
     fn readlink(&mut self, _req: &Request, _ino: u64, reply: ReplyData) {
         // debug!("ReadLink: {}", _ino)
         match self.readlink_guard(&_req.into(), _ino as usize) {
@@ -84,7 +80,6 @@ impl Filesystem for BlockCacheDevice {
             Ok(buf) => reply.data(buf.as_ref())
         }
     }
-
     fn mknod(
         &mut self,
         _req: &Request,
@@ -101,7 +96,6 @@ impl Filesystem for BlockCacheDevice {
             Ok(buf) => reply.entry(&ttl, &buf.into(), 0)
         }
     }
-
     fn mkdir(
         &mut self,
         _req: &Request,
@@ -122,6 +116,17 @@ impl Filesystem for BlockCacheDevice {
         match self.unlink_guard(&_req.into(), _parent as usize, _name.into()) {
             Err(e) => reply.error(e),
             Ok(_) => reply.ok()
+        }
+    }
+
+    fn rmdir(&mut self, _req: &Request<'_>, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
+        match self.rmdir_guard(&_req.into(), _parent as usize, _name.into()) {
+            Ok(_) => {
+                reply.ok()
+            }
+            Err(e) => {
+                reply.error(e)
+            }
         }
     }
 
@@ -358,7 +363,7 @@ impl Into<FileAttr> for InodeWithId {
             padding: 0,
             flags: 0,
         };
-        debug!("Attr:{:?}",attr);
+        // debug!("Attr:{:?}",attr);
         attr
     }
 }

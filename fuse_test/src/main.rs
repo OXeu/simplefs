@@ -20,7 +20,6 @@ fn main() {
     let mut fs = BlockCacheDevice::new(Arc::new(FileDevice { file: Arc::new(Mutex::new(file)) }));
     fs.mkfs(1024);
     fs.print();
-
     env_logger::init();
     let mountpoint = env::args_os().nth(1).unwrap();
     println!("mount point: {:?}", mountpoint);

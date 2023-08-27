@@ -91,6 +91,29 @@ impl BlockCacheDevice {
             Err(ENOENT)
         }
     }
+    /// 只删除指定文件夹内部的所有文件，不删除文件夹本身
+    pub fn remove_dir_internal(&mut self, dir: &InodeWithId) -> Result<(), ErrorCode> {
+        let entries_opt = self.ls_internal(dir.inode());
+        match entries_opt {
+            Ok(entries) => {
+                for entry in entries {
+                    let ino = entry.inode as usize;
+                    let inode = self.inode(ino);
+                    if inode.is_dir() {
+                        if let Err(e) = self.remove_dir_internal(&inode.with_id(ino)) {
+                            return Err(e);
+                        }
+                    }
+                    // 删除目录项，减少link_count计数
+                    if let Err(e) = self.unlink_internal(dir, entry.name) {
+                        return Err(e);
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => Err(e)
+        }
+    }
     pub fn unlink_internal(
         &mut self,
         parent: &InodeWithId,
@@ -135,7 +158,7 @@ impl BlockCacheDevice {
                             name: new_name,
                             inode: entry.inode as u64,
                         });
-                        self.modify_inode(entry.inode,|ino|{
+                        self.modify_inode(entry.inode, |ino| {
                             ino.link_count += 1
                         });
                         let mut buf = vec2slice(new_dirs);

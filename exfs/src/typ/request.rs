@@ -61,7 +61,7 @@ impl Inode {
         if self.access(req.uid, req.gid, mask) {
             Ok(value)
         } else {
-            panic!("No permission: inode{:?} req:{:?} mask:{:?}",self,req,mask);
+            println!("No permission: inode{:?} req:{:?} mask:{:?}", self, req, mask);
             Err(EPERM)
         }
     }
@@ -74,7 +74,7 @@ impl Inode {
         if self.access(req.uid, req.gid, mask) {
             value()
         } else {
-            panic!("No permission function: inode{:?} req:{:?} mask:{:?}",self,req,mask);
+            println!("No permission function: inode{:?} req:{:?} mask:{:?}", self, req, mask);
             Err(EPERM)
         }
     }

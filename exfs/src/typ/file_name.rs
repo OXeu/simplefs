@@ -1,4 +1,3 @@
-use crate::manager::block_cache_manager::trim_zero;
 use std::cmp::min;
 use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
@@ -41,4 +40,17 @@ impl Into<FileName> for &OsStr {
         file_name[..len].copy_from_slice(name_str[..len].as_bytes());
         file_name.into()
     }
+}
+
+
+fn trim_zero(data: Vec<u8>) -> Vec<u8> {
+    let mut trimmed_data = data.clone();
+    while let Some(&last) = trimmed_data.last() {
+        if last == 0 {
+            trimmed_data.pop();
+        } else {
+            break;
+        }
+    }
+    trimmed_data
 }

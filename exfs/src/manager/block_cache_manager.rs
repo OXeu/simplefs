@@ -302,7 +302,6 @@ impl BlockCacheDevice {
         // 同步至磁盘
         self.sync();
     }
-
     pub fn sync(&mut self) {
         self.caches
             .iter()
@@ -324,7 +323,6 @@ impl BlockCacheDevice {
             .for_each(|(_, c)| c.lock().unwrap().sync());
         self.device.sync();
     }
-
     fn mk_root(&mut self) {
         let inode = self.alloc_block(true).unwrap();
         self.modify_inode(inode, |root| {
@@ -332,16 +330,4 @@ impl BlockCacheDevice {
             root.size = BLOCK_SIZE as u64
         })
     }
-}
-
-pub fn trim_zero(data: Vec<u8>) -> Vec<u8> {
-    let mut trimmed_data = data.clone();
-    while let Some(&last) = trimmed_data.last() {
-        if last == 0 {
-            trimmed_data.pop();
-        } else {
-            break;
-        }
-    }
-    trimmed_data
 }
