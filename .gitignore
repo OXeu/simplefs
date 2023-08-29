@@ -1,4 +1,4 @@
 .idea
-fuse_test/target
+exfs-fuse/target
 exfs/target
 */fs.img

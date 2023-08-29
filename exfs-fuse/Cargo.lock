@@ -71,7 +71,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fuse_test"
+name = "exfs-fuse"
 version = "0.1.0"
 dependencies = [
  "env_logger",

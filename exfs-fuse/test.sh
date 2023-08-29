@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #sleep "5s"
-WORK_DIR="$HOME/flexOS/fuse_test"
+WORK_DIR="$HOME/flexOS/exfs-fuse"
 FS="$WORK_DIR/fs"
 cd "$FS" || exit
 set -x
